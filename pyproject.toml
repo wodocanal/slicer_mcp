@@ -1,19 +1,13 @@
 [project]
 name = "slicer-mcp"
 version = "0.1.0"
-description = "Extensible local MCP server for FDM slicers, starting with OrcaSlicer"
+description = "AI assistant plugin for automatic 3D/5D preparation in STE Slicer"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "mcp>=1.26,<2",
-    "numpy>=2,<3",
-    "pillow>=12,<13",
-    "pydantic>=2.11,<3",
-    "trimesh>=4.10,<5",
-]
+dependencies = []
 
-[project.scripts]
-slicer-mcp = "slicer_mcp.server:main"
+[tool.uv]
+package = false
 
 [tool.ruff]
 line-length = 100
@@ -22,10 +16,6 @@ extend-exclude = ["ste_plugin/AIAssistant"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[build-system]
-requires = ["uv_build>=0.13.1,<0.14.0"]
-build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
