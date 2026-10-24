@@ -24,12 +24,11 @@ class OptimizationBridgeClient(object):
         base_url, token = self._configuration()
         base_url = (base_url or "").strip().rstrip("/")
         token = (token or "").strip()
-        if not token:
-            discovered = _read_discovered_connection()
-            discovered_url = (discovered.get("url") or "").strip().rstrip("/")
-            if discovered_url:
-                base_url = discovered_url
-                token = (discovered.get("token") or "").strip()
+        discovered = _read_discovered_connection()
+        discovered_url = (discovered.get("url") or "").strip().rstrip("/")
+        if discovered_url:
+            base_url = discovered_url
+            token = (discovered.get("token") or "").strip()
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ToolError("Optimization bridge URL is not configured")
