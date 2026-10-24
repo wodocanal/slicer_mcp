@@ -12,9 +12,19 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(PLUGIN))
 
 from core.errors import ToolError
-from core.optimization import OptimizationBridgeClient, compare_optimization_variants
+from core.optimization import (
+    OptimizationBridgeClient,
+    _read_discovered_connection,
+    compare_optimization_variants,
+)
 
-from optimization_bridge.server import BridgeState, _validate_inputs, _validate_result
+from optimization_bridge.server import (
+    BridgeState,
+    _validate_inputs,
+    _validate_result,
+    remove_connection_file,
+    write_connection_file,
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -46,6 +56,32 @@ def test_bridge_client_uses_configured_loopback_and_token():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_bridge_client_discovers_token_when_manual_token_is_empty(tmp_path, monkeypatch):
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = tmp_path / "SlicerMCP" / "optimization-bridge.json"
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    write_connection_file(connection, f"http://127.0.0.1:{server.server_port}", "secret")
+    try:
+        client = OptimizationBridgeClient(lambda: (f"http://127.0.0.1:{server.server_port}", ""))
+        assert client.capabilities(False)["status"] == "ready"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_discovery_rejects_remote_url_and_cleanup_preserves_newer_record(tmp_path):
+    path = tmp_path / "connection.json"
+    write_connection_file(path, "http://example.com:8765", "old")
+    assert _read_discovered_connection(str(path)) == {}
+    write_connection_file(path, "http://127.0.0.1:8765", "new")
+    remove_connection_file(path, "old")
+    assert path.is_file()
+    remove_connection_file(path, "new")
+    assert not path.exists()
 
 
 def test_client_rejects_insecure_remote_bridge():

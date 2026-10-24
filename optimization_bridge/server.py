@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import secrets
 import threading
 import traceback
@@ -16,6 +17,44 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+
+def default_connection_file():
+    """Return a per-user discovery file shared with the STE plugin."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "SlicerMCP" / "optimization-bridge.json"
+    return Path.home() / ".slicer-mcp" / "optimization-bridge.json"
+
+
+def write_connection_file(path, url, token):
+    path = path.expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(
+            {"version": 1, "url": url, "token": token, "pid": os.getpid()},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    try:
+        os.chmod(str(temporary), 0o600)
+    except OSError:
+        pass
+    temporary.replace(path)
+    return path
+
+
+def remove_connection_file(path, token):
+    """Do not remove a discovery record written by a newer bridge process."""
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+        if secrets.compare_digest(str(current.get("token", "")), token):
+            path.unlink()
+    except (OSError, ValueError, TypeError):
+        pass
 
 
 class BridgeState:
@@ -313,6 +352,7 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data-dir", type=Path, default=Path(__file__).parent / "data")
     parser.add_argument("--token", default="")
+    parser.add_argument("--connection-file", type=Path, default=default_connection_file())
     args = parser.parse_args()
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         parser.error("The beta bridge only binds to loopback")
@@ -320,7 +360,10 @@ def main():
     state = BridgeState(args.data_dir.resolve(), token)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.state = state
-    print("Optimization bridge: http://%s:%d" % server.server_address)
+    bridge_url = "http://%s:%d" % server.server_address
+    connection_file = write_connection_file(args.connection_file, bridge_url, token)
+    print("Optimization bridge: %s" % bridge_url)
+    print("Automatic STE discovery: %s" % connection_file)
     print("X-Bridge-Token: %s" % token)
     try:
         server.serve_forever()
@@ -328,6 +371,7 @@ def main():
         print("Optimization bridge stopped")
     finally:
         server.server_close()
+        remove_connection_file(connection_file, token)
 
 
 if __name__ == "__main__":

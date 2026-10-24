@@ -829,6 +829,14 @@ UM.Dialog {
                         Layout.fillWidth: true
                         text: manager.optimizationToken
                         echoMode: showOptimizationToken.checked ? TextInput.Normal : TextInput.Password
+                        placeholderText: "Подтянется автоматически из локального bridge"
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Оставьте поле пустым: локальный bridge передаст токен автоматически. " +
+                              "Ручной токен нужен только для нестандартной конфигурации."
+                        color: "#5d6975"
                     }
                     CheckBox {
                         id: showOptimizationToken

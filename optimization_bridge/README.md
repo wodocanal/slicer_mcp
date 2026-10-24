@@ -11,8 +11,15 @@ pip install ansys-mechanical-core
 python server.py --data-dir C:\slicer-optimization-data
 ```
 
-The server prints a loopback URL and a random `X-Bridge-Token`. Enter both in
-the plugin's **Optimization beta** tab.
+The server writes its loopback URL and random token to the current user's
+`%LOCALAPPDATA%\SlicerMCP\optimization-bridge.json`. The STE plugin discovers
+this file automatically, so normally you only need to start the bridge and
+click **Check Ansys**. The file is removed on a normal shutdown and is protected
+by the Windows user-profile ACL. `--connection-file` can override its location;
+that nonstandard path requires corresponding manual plugin configuration.
+
+The token is still printed for diagnostics and can be entered manually in the
+plugin's **Optimization beta** tab as a fallback.
 
 Each calculation is an explicitly prepared template:
 
