@@ -91,3 +91,8 @@ def test_qml_uses_embedded_dialog_and_exposes_tool_activity():
     assert "Qt.NonModal" in qml
     assert 'modelData.role === "tool"' in qml
     assert "manager.sendMessage" in qml
+    assert "manager.copyToClipboard" in qml
+    assert 'text: "⚠ Риски"' in qml
+    assert "manager.calculateRiskMap" in qml
+    assert "manager.calculateFailureCost" in qml
+    assert "Подтянется автоматически из локального bridge" in qml

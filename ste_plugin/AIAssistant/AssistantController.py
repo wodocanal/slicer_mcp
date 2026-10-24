@@ -259,6 +259,18 @@ class AssistantController(QObject):
         self._attachment_error = ""
         self.attachmentChanged.emit()
 
+    @pyqtSlot(str, result=bool)
+    def copyToClipboard(self, text):
+        try:
+            from PyQt5.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            if clipboard is not None:
+                clipboard.setText(text)
+                return True
+        except Exception as error:
+            Logger.logException("w", "Failed to copy text to clipboard: %s" % error)
+        return False
+
     @pyqtSlot()
     def clearHistory(self):
         if self._busy:

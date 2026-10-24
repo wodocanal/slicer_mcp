@@ -233,8 +233,10 @@ UM.Dialog {
 
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8 * screenScaleFactor
+
             Button {
-                text: "Чат"
+                text: "💬 Чат"
                 checkable: true
                 checked: !root.settingsVisible && !root.economicsVisible &&
                          !root.optimizationVisible && !root.analysisVisible
@@ -242,7 +244,7 @@ UM.Dialog {
                              root.optimizationVisible = false; root.analysisVisible = false }
             }
             Button {
-                text: "Смета"
+                text: "📊 Смета"
                 checkable: true
                 checked: root.economicsVisible
                 onClicked: {
@@ -254,7 +256,7 @@ UM.Dialog {
                 }
             }
             Button {
-                text: "Риски"
+                text: "⚠ Риски"
                 checkable: true
                 checked: root.analysisVisible
                 onClicked: {
@@ -265,7 +267,7 @@ UM.Dialog {
                 }
             }
             Button {
-                text: "Оптимизация · beta"
+                text: "⚡ Оптимизация · beta"
                 checkable: true
                 checked: root.optimizationVisible
                 onClicked: {
@@ -276,15 +278,40 @@ UM.Dialog {
                 }
             }
             Button {
-                text: "Настройки"
+                text: "⚙ Настройки"
                 checkable: true
                 checked: root.settingsVisible
                 onClicked: root.showSettings()
             }
             Item { Layout.fillWidth: true }
-            Label {
-                text: manager.busy ? "Агент работает…" : "Готов"
-                color: manager.busy ? "#d98200" : "#39823c"
+
+            Rectangle {
+                Layout.preferredHeight: 26 * screenScaleFactor
+                Layout.preferredWidth: statusRow.implicitWidth + 16 * screenScaleFactor
+                radius: 13 * screenScaleFactor
+                color: manager.busy ? "#fffaf0" : "#f0fff4"
+                border.color: manager.busy ? "#fbd38d" : "#9ae6b4"
+                border.width: 1
+
+                RowLayout {
+                    id: statusRow
+                    anchors.centerIn: parent
+                    spacing: 5 * screenScaleFactor
+
+                    Rectangle {
+                        width: 8 * screenScaleFactor
+                        height: 8 * screenScaleFactor
+                        radius: 4 * screenScaleFactor
+                        color: manager.busy ? "#dd6b20" : "#38a169"
+                    }
+
+                    Text {
+                        text: manager.busy ? "Агент работает…" : "Готов к работе"
+                        font.pixelSize: 11 * screenScaleFactor
+                        font.bold: true
+                        color: manager.busy ? "#c05621" : "#276749"
+                    }
+                }
             }
         }
 
@@ -314,40 +341,111 @@ UM.Dialog {
                         model: root.chatMessages
 
                         delegate: Item {
+                            id: msgItem
                             width: messages.width
-                            height: bubble.height
+                            height: bubble.height + 6 * screenScaleFactor
+                            property bool isUser: modelData.role === "user"
+                            property bool isAssistant: modelData.role === "assistant"
+                            property bool isTool: modelData.role === "tool"
+                            property bool isError: modelData.kind === "error"
+                            property bool copiedRecently: false
+
+                            Timer {
+                                id: resetCopyTimer
+                                interval: 1800
+                                repeat: false
+                                onTriggered: msgItem.copiedRecently = false
+                            }
+
                             Rectangle {
                                 id: bubble
-                                width: parent.width * 0.9
-                                height: messageText.implicitHeight + attachmentText.implicitHeight + 22 * screenScaleFactor
-                                anchors.right: modelData.role === "user" ? parent.right : undefined
-                                anchors.left: modelData.role === "user" ? undefined : parent.left
+                                width: parent.width * 0.92
+                                height: contentColumn.implicitHeight + 16 * screenScaleFactor
+                                anchors.right: msgItem.isUser ? parent.right : undefined
+                                anchors.left: msgItem.isUser ? undefined : parent.left
                                 radius: 8 * screenScaleFactor
-                                color: modelData.kind === "error" ? "#fde8e8" :
-                                       modelData.role === "user" ? "#dcecff" :
-                                       modelData.role === "tool" ? "#edf0f2" : "white"
-                                border.color: modelData.kind === "tool_start" ? "#5b8def" : "#d5d9dd"
+                                color: msgItem.isError ? "#fff5f5" :
+                                       msgItem.isUser ? "#edf5ff" :
+                                       msgItem.isTool ? "#f3f5f7" : "#ffffff"
+                                border.color: msgItem.isError ? "#f8b4b4" :
+                                              msgItem.isUser ? "#b9daf8" :
+                                              msgItem.isTool ? "#d5dbe1" : "#e2e6eb"
+                                border.width: 1
 
                                 Column {
+                                    id: contentColumn
                                     anchors.fill: parent
                                     anchors.margins: 10 * screenScaleFactor
-                                    spacing: 3 * screenScaleFactor
+                                    spacing: 5 * screenScaleFactor
+
+                                    RowLayout {
+                                        width: parent.width
+                                        spacing: 6 * screenScaleFactor
+
+                                        Rectangle {
+                                            width: 18 * screenScaleFactor
+                                            height: 18 * screenScaleFactor
+                                            radius: 9 * screenScaleFactor
+                                            color: msgItem.isError ? "#e53e3e" :
+                                                   msgItem.isUser ? "#2b6cb0" :
+                                                   msgItem.isTool ? "#718096" : "#2f855a"
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: msgItem.isError ? "!" :
+                                                      msgItem.isUser ? "👤" :
+                                                      msgItem.isTool ? "⚙" : "🤖"
+                                                font.pixelSize: 10 * screenScaleFactor
+                                                color: "#ffffff"
+                                            }
+                                        }
+
+                                        Text {
+                                            text: msgItem.isError ? "Системное предупреждение" :
+                                                  msgItem.isUser ? "Пользователь" :
+                                                  msgItem.isTool ? (modelData.kind === "tool_start" ? "Запуск инструмента" : "Результат инструмента") :
+                                                  "AI Assistant"
+                                            font.bold: true
+                                            font.pixelSize: 11 * screenScaleFactor
+                                            color: msgItem.isError ? "#c53030" :
+                                                   msgItem.isUser ? "#2b6cb0" :
+                                                   msgItem.isTool ? "#4a5568" : "#22543d"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Button {
+                                            id: copyButton
+                                            visible: msgItem.isAssistant || msgItem.isUser || msgItem.isTool
+                                            text: msgItem.copiedRecently ? "✓ Скопировано" : "Копировать"
+                                            Layout.preferredHeight: 22 * screenScaleFactor
+                                            onClicked: {
+                                                var ok = manager.copyToClipboard(modelData.text)
+                                                if (ok) {
+                                                    msgItem.copiedRecently = true
+                                                    resetCopyTimer.restart()
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     Text {
                                         id: messageText
-                                        width: bubble.width - 20 * screenScaleFactor
+                                        width: parent.width
                                         text: modelData.text
                                         wrapMode: Text.Wrap
                                         textFormat: Text.PlainText
-                                        color: "#222222"
+                                        color: msgItem.isError ? "#9b2c2c" : "#1a202c"
                                         font.pixelSize: 13 * screenScaleFactor
                                     }
+
                                     Text {
                                         id: attachmentText
-                                        width: messageText.width
+                                        width: parent.width
                                         visible: modelData.attachments && modelData.attachments.length > 0
                                         text: visible ? "📎 " + modelData.attachments.join(", ") : ""
                                         wrapMode: Text.Wrap
-                                        color: "#5b6770"
+                                        color: "#4a5568"
                                         font.pixelSize: 11 * screenScaleFactor
                                     }
                                 }
@@ -362,44 +460,59 @@ UM.Dialog {
                     indeterminate: true
                 }
 
-                RowLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    Button {
-                        text: "Прикрепить"
-                        enabled: !manager.busy
-                        onClicked: attachmentDialog.open()
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: manager.attachmentLabel
-                        elide: Text.ElideMiddle
-                        color: "#5b6770"
-                    }
-                    Button {
-                        text: "Очистить"
-                        enabled: !manager.busy
-                        onClicked: manager.clearAttachments()
+                    Layout.preferredHeight: 34 * screenScaleFactor
+                    color: "#f8fafc"
+                    border.color: "#e2e8f0"
+                    radius: 4 * screenScaleFactor
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 4 * screenScaleFactor
+                        spacing: 6 * screenScaleFactor
+
+                        Button {
+                            text: "📎 Прикрепить"
+                            enabled: !manager.busy
+                            onClicked: attachmentDialog.open()
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: manager.attachmentLabel
+                            elide: Text.ElideMiddle
+                            color: "#4a5568"
+                            font.pixelSize: 11 * screenScaleFactor
+                        }
+                        Button {
+                            text: "✕ Сброс"
+                            enabled: !manager.busy && manager.attachmentLabel !== "Файлы не выбраны"
+                            onClicked: manager.clearAttachments()
+                        }
                     }
                 }
 
                 TextArea {
                     id: composer
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 90 * screenScaleFactor
+                    Layout.preferredHeight: 88 * screenScaleFactor
                     enabled: !manager.busy
                     wrapMode: TextEdit.Wrap
+                    font.pixelSize: 13 * screenScaleFactor
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
+                    spacing: 8 * screenScaleFactor
+
                     Button {
-                        text: "Очистить историю"
+                        text: "🗑 Очистить историю"
                         enabled: !manager.busy
                         onClicked: manager.clearHistory()
                     }
                     Item { Layout.fillWidth: true }
                     Button {
-                        text: manager.busy ? "Выполняется…" : "Отправить"
+                        text: manager.busy ? "⌛ Выполняется…" : "➤ Отправить"
                         enabled: !manager.busy && composer.text.trim().length > 0
                         onClicked: {
                             var text = composer.text
@@ -542,13 +655,31 @@ UM.Dialog {
                                  root.economics.slicing.state === "done"
                         onClicked: manager.calculateEconomics(JSON.stringify(root.costArguments()))
                     }
-                    Text {
+                    Rectangle {
                         Layout.fillWidth: true
-                        text: root.costSummary(root.economics.quote)
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        color: "#202830"
+                        Layout.preferredHeight: costText.implicitHeight + 20 * screenScaleFactor
+                        color: root.economics.quote ? "#f7fafc" : "#edf2f7"
+                        border.color: root.economics.quote ? "#cbd5e0" : "#e2e8f0"
+                        radius: 6 * screenScaleFactor
+
+                        Text {
+                            id: costText
+                            anchors.fill: parent
+                            anchors.margins: 10 * screenScaleFactor
+                            text: root.costSummary(root.economics.quote)
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            color: "#1a202c"
+                            font.pixelSize: 12 * screenScaleFactor
+                        }
                     }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#e2e8f0"
+                    }
+
                     Label {
                         Layout.fillWidth: true
                         text: "Сравнение двух фактически прослайсенных вариантов"
@@ -558,13 +689,16 @@ UM.Dialog {
                     Label {
                         Layout.fillWidth: true
                         text: "Перед сменой настроек сохраните проект 3MF. Пробный расчёт меняет живой проект; эта панель его не восстанавливает."
-                        color: "#8b5a00"
+                        color: "#c05621"
+                        font.pixelSize: 11 * screenScaleFactor
                         wrapMode: Text.Wrap
                     }
                     RowLayout {
                         Layout.fillWidth: true
+                        spacing: 8 * screenScaleFactor
+
                         Button {
-                            text: "Сохранить исходный"
+                            text: "💾 Сохранить исходный"
                             enabled: !manager.busy && root.economics.slicing &&
                                      root.economics.slicing.state === "done"
                             onClicked: {
@@ -574,7 +708,7 @@ UM.Dialog {
                             }
                         }
                         Button {
-                            text: "Сохранить вариант"
+                            text: "💾 Сохранить вариант"
                             enabled: !manager.busy && root.economics.slicing &&
                                      root.economics.slicing.state === "done"
                             onClicked: {
@@ -586,20 +720,37 @@ UM.Dialog {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: "Исходный: " + (root.economics.baseline ? "зафиксирован" : "нет") +
-                              "; вариант: " + (root.economics.candidate ? "зафиксирован" : "нет")
+                        text: "Исходный: " + (root.economics.baseline ? "✓ зафиксирован" : "не сохранён") +
+                              "  |  Вариант: " + (root.economics.candidate ? "✓ зафиксирован" : "не сохранён")
+                        font.bold: true
+                        color: "#4a5568"
                         wrapMode: Text.Wrap
                     }
-                    Text {
+
+                    Rectangle {
                         Layout.fillWidth: true
-                        text: root.comparisonSummary(root.economics.comparison)
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        color: "#202830"
+                        Layout.preferredHeight: comparisonText.implicitHeight + 20 * screenScaleFactor
+                        color: root.economics.comparison ? "#f0fff4" : "#f7fafc"
+                        border.color: root.economics.comparison ? "#9ae6b4" : "#e2e8f0"
+                        radius: 6 * screenScaleFactor
+
+                        Text {
+                            id: comparisonText
+                            anchors.fill: parent
+                            anchors.margins: 10 * screenScaleFactor
+                            text: root.comparisonSummary(root.economics.comparison)
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            color: "#1a202c"
+                            font.pixelSize: 12 * screenScaleFactor
+                        }
                     }
+
                     Label {
                         Layout.fillWidth: true
                         text: "Сравнение не подтверждает прочность. Для численной оценки нужны нагрузки, закрепления, направление слоёв и испытанные свойства материала."
+                        font.pixelSize: 11 * screenScaleFactor
+                        color: "#718096"
                         wrapMode: Text.Wrap
                     }
                 }
