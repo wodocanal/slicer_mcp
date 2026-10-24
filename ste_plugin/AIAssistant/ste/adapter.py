@@ -24,6 +24,7 @@ from steslicer.Settings.ExtruderManager import ExtruderManager
 
 from ..core.errors import ToolError
 from ..core.economics import estimate_print_cost, compare_cost_variants
+from ..core.failure_cost import analyze_failure_cost
 from ..core.manufacturing import (
     capture_manufacturing_scenario,
     compare_manufacturing_scenarios,
@@ -31,6 +32,7 @@ from ..core.manufacturing import (
 )
 from ..core.optimization import compare_optimization_variants
 from ..core.risk import assess_print_risk
+from ..core.risk_map import analyze_geometry_risk_map
 
 
 ALLOWED_SETTINGS = set(
@@ -340,6 +342,51 @@ class SteSlicerAdapter(object):
     def _assess_risk(self, args):
         return assess_print_risk(self._manufacturing_snapshot(), args.get("observations") or {})
 
+    def geometry_risk_map(self, args):
+        meshes = self._on_qt(self._risk_map_meshes, args.get("object_id"))
+        result = analyze_geometry_risk_map(meshes, args)
+        result["visualization"] = {
+            "type": "spatial_hotspots",
+            "note": (
+                "Hotspots contain world-space centroids for highlighting in the STE view; "
+                "this beta does not modify or recolor the printable mesh."
+            ),
+        }
+        return result
+
+    def _risk_map_meshes(self, requested):
+        meshes = []
+        self._list_objects()
+        for object_id, node in self._nodes.items():
+            if requested and object_id != requested:
+                continue
+            mesh = node.getMeshData()
+            try:
+                transformed = mesh.getTransformed(node.getWorldTransformation())
+                if transformed is not None:
+                    mesh = transformed
+            except (AttributeError, TypeError):
+                pass
+            vertices_raw = mesh.getVertices()
+            indices_raw = mesh.getIndices()
+            vertices = [
+                [float(value[0]), float(value[1]), float(value[2])]
+                for value in vertices_raw
+            ]
+            if indices_raw is None:
+                triangles = [list(range(index, index + 3))
+                             for index in range(0, len(vertices) - 2, 3)]
+            else:
+                triangles = [
+                    [int(value[0]), int(value[1]), int(value[2])]
+                    for value in indices_raw
+                ]
+            meshes.append({"object_id": object_id, "name": node.getName(),
+                           "vertices": vertices, "triangles": triangles})
+        if requested and not meshes:
+            raise ToolError("Unknown object_id; call list_objects again")
+        return meshes
+
     def _manufacturing_snapshot(self):
         stack = self._stack()
         slicing = self._slice_status()
@@ -481,6 +528,12 @@ class SteSlicerAdapter(object):
 
     def _estimate_print_cost(self, args):
         return estimate_print_cost(self._slice_status(), args)
+
+    def failure_cost(self, args):
+        return self._on_qt(self._failure_cost, args)
+
+    def _failure_cost(self, args):
+        return analyze_failure_cost(self._slice_status(), args)
 
     def capture_cost_variant(self, args):
         return self._on_qt(self._capture_cost_variant, args)

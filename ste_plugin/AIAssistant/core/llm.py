@@ -54,7 +54,12 @@ ran, exported a model or validated strength unless the completed job reports tha
 optimized geometry only through import_optimized_variant. Slice and capture the baseline and
 optimized variants separately with equal settings and tariffs before comparing them. Clearly
 separate Ansys engineering validation, slicer economics, print-risk screening and physical FDM
-testing."""
+testing. When explaining where geometric risk occurs, call analyze_geometry_risk_map and cite the
+returned object, hotspot coordinates, area and limitation; never claim that bridge candidates are
+ray-cast verified bridges. For expensive or batch jobs, use analyze_failure_cost_scenarios after a
+completed slice to show early, middle and late failure impact. Never convert assess_print_risk's
+0-100 screening rating into a failure probability. Only calculate an expected monetary loss when
+the user explicitly supplies calibrated scenario probabilities, and label their source."""
 
 
 def requested_file_writes(user_text):

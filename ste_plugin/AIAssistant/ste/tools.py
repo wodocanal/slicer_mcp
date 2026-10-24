@@ -137,6 +137,18 @@ def build_registry(registry, adapter):
         [],
         adapter.assess_risk,
     )
+    registry.add(
+        "analyze_geometry_risk_map",
+        "Analyze the current oriented triangle mesh and return spatial first-layer and "
+        "overhang/bridge-candidate hotspots with STE world coordinates. Does not modify geometry.",
+        {
+            "object_id": STRING,
+            "overhang_limit_deg": {"type": "number", "minimum": 0, "maximum": 90},
+            "first_layer_height_mm": {"type": "number", "exclusiveMinimum": 0, "maximum": 5},
+            "max_hotspots": {"type": "integer", "minimum": 1, "maximum": 1000},
+        },
+        [], adapter.geometry_risk_map,
+    )
     priority_properties = {
         "scenario": {"type": "string", "enum": ["prototype", "production"]},
         "quantity": {"type": "integer", "minimum": 1},
@@ -176,6 +188,32 @@ def build_registry(registry, adapter):
         "Returns print cost, separately entered outside work, and customer price; "
         "does not infer rates or strength.",
         cost_properties, cost_required, adapter.estimate_print_cost,
+    )
+    failure_cost_properties = {
+        "machine_hour_rate_rub": NUMBER,
+        "material_prices_rub_per_kg": {
+            "type": "array", "items": NUMBER,
+            "description": "RUB per kg, one entry per extruder slot",
+        },
+        "quantity": {"type": "integer", "minimum": 1},
+        "parts_per_job": {"type": "integer", "minimum": 1},
+        "machine_count": {"type": "integer", "minimum": 1},
+        "delay_cost_rub_per_hour": NUMBER,
+        "failure_stages_percent": {
+            "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 100},
+        },
+        "failure_probabilities_percent": {
+            "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 100},
+        },
+    }
+    registry.add(
+        "analyze_failure_cost_scenarios",
+        "Calculate economic impact of one failed reference job at explicit completion stages: "
+        "lost material, machine time, replacement, schedule delay and optional user-supplied "
+        "probability-weighted loss. Never converts the print-risk score into probability.",
+        failure_cost_properties,
+        ["machine_hour_rate_rub", "material_prices_rub_per_kg", "quantity", "parts_per_job"],
+        adapter.failure_cost,
     )
     variant_properties = dict(cost_properties)
     variant_properties.update({

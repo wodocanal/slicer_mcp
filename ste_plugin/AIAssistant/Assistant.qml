@@ -9,7 +9,7 @@ import UM 1.1 as UM
 UM.Dialog {
     id: root
     title: "AI Assistant — подготовка 3D/5D-печати"
-    width: 560 * screenScaleFactor
+    width: 680 * screenScaleFactor
     height: 720 * screenScaleFactor
     minimumWidth: 440 * screenScaleFactor
     minimumHeight: 520 * screenScaleFactor
@@ -18,9 +18,11 @@ UM.Dialog {
     property bool settingsVisible: false
     property bool economicsVisible: false
     property bool optimizationVisible: false
+    property bool analysisVisible: false
     property var chatMessages: []
     property var economics: ({})
     property var optimization: ({})
+    property var insights: ({})
 
     function refreshMessages() {
         try {
@@ -35,6 +37,7 @@ UM.Dialog {
         settingsVisible = true
         economicsVisible = false
         optimizationVisible = false
+        analysisVisible = false
     }
 
     function refreshEconomicsData() {
@@ -51,6 +54,60 @@ UM.Dialog {
         } catch (error) {
             optimization = ({error: "Не удалось прочитать состояние интеграции"})
         }
+    }
+
+    function refreshInsightsData() {
+        try {
+            insights = JSON.parse(manager.insightsJson)
+        } catch (error) {
+            insights = ({error: "Не удалось прочитать результаты анализа"})
+        }
+    }
+
+    function numberList(text) {
+        var raw = String(text).split(",")
+        var values = []
+        for (var i = 0; i < raw.length; ++i) {
+            var value = asNumber(raw[i])
+            if (value !== null) values.push(value)
+        }
+        return values
+    }
+
+    function riskMapSummary(value) {
+        if (!value) return "Нажмите «Построить карту» после загрузки модели."
+        var lines = [
+            "Контакт первого слоя: " + value.totals.first_layer_contact_area_mm2 + " мм²",
+            "Рискованная площадь нависаний: " + value.totals.risky_overhang_area_mm2 + " мм²",
+            "Проблемных треугольников: " + value.totals.hotspot_count
+        ]
+        var hotspots = value.hotspots || []
+        for (var i = 0; i < hotspots.length && i < 10; ++i) {
+            var h = hotspots[i]
+            lines.push((i + 1) + ". " + h.object_name + ": " + h.kind +
+                       ", риск " + h.severity + "/100, угол " + h.overhang_deg +
+                       "°, XYZ " + h.centroid_mm.join(", "))
+        }
+        return lines.join("\n")
+    }
+
+    function failureCostSummary(value) {
+        if (!value) return "Для расчёта нужен завершённый слайс и ваши тарифы."
+        var lines = [
+            "Базовая стоимость партии: " + value.production.baseline_print_cost_rub.toFixed(2) + " ₽"
+        ]
+        var scenarios = value.scenarios || []
+        for (var i = 0; i < scenarios.length; ++i) {
+            var item = scenarios[i]
+            lines.push("Отказ на " + item.failure_stage_percent + "%: +" +
+                       item.total_extra_cost_rub.toFixed(2) + " ₽, задержка " +
+                       item.estimated_schedule_delay_seconds + " с")
+        }
+        if (value.expected_extra_cost_rub !== undefined) {
+            lines.push("Ожидаемый ущерб по введённым вероятностям: " +
+                       value.expected_extra_cost_rub.toFixed(2) + " ₽")
+        }
+        return lines.join("\n")
     }
 
     function optimizationTemplateSummary() {
@@ -135,6 +192,7 @@ UM.Dialog {
         refreshMessages()
         refreshEconomicsData()
         refreshOptimizationData()
+        refreshInsightsData()
     }
 
     ColumnLayout {
@@ -146,6 +204,7 @@ UM.Dialog {
             onMessagesChanged: root.refreshMessages()
             onEconomicsChanged: root.refreshEconomicsData()
             onOptimizationChanged: root.refreshOptimizationData()
+            onInsightsChanged: root.refreshInsightsData()
         }
 
         FileDialog {
@@ -178,9 +237,9 @@ UM.Dialog {
                 text: "Чат"
                 checkable: true
                 checked: !root.settingsVisible && !root.economicsVisible &&
-                         !root.optimizationVisible
+                         !root.optimizationVisible && !root.analysisVisible
                 onClicked: { root.settingsVisible = false; root.economicsVisible = false;
-                             root.optimizationVisible = false }
+                             root.optimizationVisible = false; root.analysisVisible = false }
             }
             Button {
                 text: "Смета"
@@ -190,7 +249,19 @@ UM.Dialog {
                     root.settingsVisible = false
                     root.economicsVisible = true
                     root.optimizationVisible = false
+                    root.analysisVisible = false
                     manager.refreshEconomics()
+                }
+            }
+            Button {
+                text: "Риски"
+                checkable: true
+                checked: root.analysisVisible
+                onClicked: {
+                    root.settingsVisible = false
+                    root.economicsVisible = false
+                    root.optimizationVisible = false
+                    root.analysisVisible = true
                 }
             }
             Button {
@@ -201,6 +272,7 @@ UM.Dialog {
                     root.settingsVisible = false
                     root.economicsVisible = false
                     root.optimizationVisible = true
+                    root.analysisVisible = false
                 }
             }
             Button {
@@ -223,7 +295,7 @@ UM.Dialog {
             ColumnLayout {
                 anchors.fill: parent
                 visible: !root.settingsVisible && !root.economicsVisible &&
-                         !root.optimizationVisible
+                         !root.optimizationVisible && !root.analysisVisible
                 spacing: 8 * screenScaleFactor
 
                 Rectangle {
@@ -528,6 +600,116 @@ UM.Dialog {
                     Label {
                         Layout.fillWidth: true
                         text: "Сравнение не подтверждает прочность. Для численной оценки нужны нагрузки, закрепления, направление слоёв и испытанные свойства материала."
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
+
+            Flickable {
+                anchors.fill: parent
+                visible: root.analysisVisible
+                clip: true
+                contentWidth: width
+                contentHeight: insightsForm.implicitHeight + 20 * screenScaleFactor
+
+                ColumnLayout {
+                    id: insightsForm
+                    x: 10 * screenScaleFactor
+                    y: 8 * screenScaleFactor
+                    width: parent.width - 20 * screenScaleFactor
+                    spacing: 8 * screenScaleFactor
+
+                    Label { text: "Пространственная карта рисков"; font.bold: true }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Анализируется реальная треугольная сетка в текущей ориентации. " +
+                              "Координаты проблемных зон относятся к системе STE (+Y вверх). " +
+                              "Printable mesh не перекрашивается и не изменяется."
+                    }
+                    RowLayout {
+                        Label { text: "Порог нависания, °" }
+                        TextField { id: riskAngle; text: "45"; Layout.preferredWidth: 80 * screenScaleFactor }
+                        Label { text: "Первый слой, мм" }
+                        TextField { id: riskLayer; text: "0.3"; Layout.preferredWidth: 80 * screenScaleFactor }
+                        Label { text: "Макс. зон" }
+                        TextField { id: riskLimit; text: "100"; Layout.preferredWidth: 80 * screenScaleFactor }
+                    }
+                    Button {
+                        text: root.insights.busy ? "Анализ…" : "Построить карту"
+                        enabled: !root.insights.busy
+                        onClicked: manager.calculateRiskMap(JSON.stringify({
+                            overhang_limit_deg: root.asNumber(riskAngle.text),
+                            first_layer_height_mm: root.asNumber(riskLayer.text),
+                            max_hotspots: root.asNumber(riskLimit.text)
+                        }))
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.riskMapSummary(root.insights.risk_map)
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        color: "#202830"
+                    }
+
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#c9d0d7" }
+                    Label { text: "Стоимость ошибки печати"; font.bold: true }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Сценарии используют реальное время и массу завершённого слайса. " +
+                              "Рейтинг риска не превращается в вероятность брака."
+                    }
+                    GridLayout {
+                        columns: 4
+                        Layout.fillWidth: true
+                        Label { text: "Станок, ₽/ч" }
+                        TextField { id: failureMachineRate; placeholderText: "150" }
+                        Label { text: "Материалы ₽/кг" }
+                        TextField { id: failureMaterialRates; placeholderText: "1800, 3500" }
+                        Label { text: "Количество" }
+                        TextField { id: failureQuantity; text: "1" }
+                        Label { text: "Деталей/задание" }
+                        TextField { id: failurePartsPerJob; text: "1" }
+                        Label { text: "Принтеров" }
+                        TextField { id: failureMachines; text: "1" }
+                        Label { text: "Простой, ₽/ч" }
+                        TextField { id: failureDelayRate; text: "0" }
+                        Label { text: "Стадии, %" }
+                        TextField { id: failureStages; text: "25, 50, 100" }
+                        Label { text: "Вероятности, %" }
+                        TextField { id: failureProbabilities; placeholderText: "необязательно" }
+                    }
+                    Button {
+                        text: root.insights.busy ? "Расчёт…" : "Рассчитать последствия"
+                        enabled: !root.insights.busy
+                        onClicked: {
+                            var args = {
+                                machine_hour_rate_rub: root.asNumber(failureMachineRate.text),
+                                material_prices_rub_per_kg: root.numberList(failureMaterialRates.text),
+                                quantity: root.asNumber(failureQuantity.text),
+                                parts_per_job: root.asNumber(failurePartsPerJob.text),
+                                machine_count: root.asNumber(failureMachines.text),
+                                delay_cost_rub_per_hour: root.asNumber(failureDelayRate.text),
+                                failure_stages_percent: root.numberList(failureStages.text)
+                            }
+                            var probabilities = root.numberList(failureProbabilities.text)
+                            if (probabilities.length) args.failure_probabilities_percent = probabilities
+                            manager.calculateFailureCost(JSON.stringify(args))
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.failureCostSummary(root.insights.failure_cost)
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        color: "#202830"
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: root.insights.error && root.insights.error.length > 0
+                        text: "Ошибка: " + (root.insights.error || "")
+                        color: "#bb3030"
                         wrapMode: Text.Wrap
                     }
                 }

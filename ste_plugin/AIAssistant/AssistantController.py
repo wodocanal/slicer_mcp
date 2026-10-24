@@ -20,6 +20,7 @@ class AssistantController(QObject):
     attachmentChanged = pyqtSignal()
     economicsChanged = pyqtSignal()
     optimizationChanged = pyqtSignal()
+    insightsChanged = pyqtSignal()
 
     def __init__(self, application, registry, mcp_server, parent=None):
         QObject.__init__(self, parent)
@@ -35,6 +36,8 @@ class AssistantController(QObject):
                            "candidate": None, "comparison": None, "error": ""}
         self._optimization = {"checking": False, "capabilities": None,
                               "templates": [], "error": ""}
+        self._insights = {"busy": False, "risk_map": None, "failure_cost": None,
+                          "error": ""}
         preferences = application.getPreferences()
         preferences.addPreference("ai_assistant/base_url", DEFAULT_BASE_URL)
         preferences.addPreference("ai_assistant/api_key", "")
@@ -88,6 +91,54 @@ class AssistantController(QObject):
     @pyqtProperty(str, notify=optimizationChanged)
     def optimizationToken(self):
         return self._preferences.getValue("ai_assistant/optimization_token") or ""
+
+    @pyqtProperty(str, notify=insightsChanged)
+    def insightsJson(self):
+        return json.dumps(self._insights, ensure_ascii=False)
+
+    @pyqtSlot(str)
+    def calculateRiskMap(self, payload):
+        if self._insights["busy"]:
+            return
+        self._insights["busy"] = True
+        self._insights["error"] = ""
+        self.insightsChanged.emit()
+        thread = threading.Thread(target=self._calculate_risk_map, args=(payload,))
+        thread.daemon = True
+        thread.start()
+
+    def _calculate_risk_map(self, payload):
+        try:
+            result = self._registry.call("analyze_geometry_risk_map", json.loads(payload))
+            self._app.callLater(self._finish_insight, "risk_map", result, "")
+        except Exception as error:
+            self._app.callLater(self._finish_insight, "risk_map", None, str(error))
+
+    @pyqtSlot(str)
+    def calculateFailureCost(self, payload):
+        if self._insights["busy"]:
+            return
+        self._insights["busy"] = True
+        self._insights["error"] = ""
+        self.insightsChanged.emit()
+        thread = threading.Thread(target=self._calculate_failure_cost, args=(payload,))
+        thread.daemon = True
+        thread.start()
+
+    def _calculate_failure_cost(self, payload):
+        try:
+            result = self._registry.call(
+                "analyze_failure_cost_scenarios", json.loads(payload)
+            )
+            self._app.callLater(self._finish_insight, "failure_cost", result, "")
+        except Exception as error:
+            self._app.callLater(self._finish_insight, "failure_cost", None, str(error))
+
+    def _finish_insight(self, key, value, error):
+        self._insights["busy"] = False
+        self._insights[key] = value
+        self._insights["error"] = error
+        self.insightsChanged.emit()
 
     @pyqtSlot(str, str)
     def saveOptimizationSettings(self, url, token):
