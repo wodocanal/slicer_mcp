@@ -37,7 +37,15 @@ print, call assess_print_risk after the intended settings and orientation are ap
 after slicing when actual time and material are available. Supply bridge, overhang and first-layer
 contact observations only when supported by the model or image; otherwise omit them. Present the
 overall score and the highest category risks, unknowns and mitigations. A risk score is a screening
-rating, not a calibrated probability or guarantee of failure. Never invent geometry observations."""
+rating, not a calibrated probability or guarantee of failure. Never invent geometry observations.
+When the user wants a prototype and production comparison, use plan_manufacturing_settings for
+each scenario. A prototype should prioritize a fast, inexpensive physical check; production
+priorities come from the user and may emphasize strength, appearance, speed or cost. Do not claim
+that wall count or infill proves strength. Apply and slice each scenario separately, then call
+capture_manufacturing_scenario with explicit tariffs, quantity and parts per completed reference
+job. Capture both scenarios before comparing them. Treat reserve_percent as user-selected planning
+capacity, never as a predicted failure rate. For a batch, report total machine time separately from
+elapsed time across parallel printers."""
 
 
 def requested_file_writes(user_text):

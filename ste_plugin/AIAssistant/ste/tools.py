@@ -137,6 +137,22 @@ def build_registry(registry, adapter):
         [],
         adapter.assess_risk,
     )
+    priority_properties = {
+        "scenario": {"type": "string", "enum": ["prototype", "production"]},
+        "quantity": {"type": "integer", "minimum": 1},
+        "strength_priority": {"type": "number", "minimum": 0, "maximum": 100},
+        "appearance_priority": {"type": "number", "minimum": 0, "maximum": 100},
+        "speed_priority": {"type": "number", "minimum": 0, "maximum": 100},
+        "cost_priority": {"type": "number", "minimum": 0, "maximum": 100},
+    }
+    registry.add(
+        "plan_manufacturing_settings",
+        "Recommend transparent starting settings for a fast low-cost prototype or final "
+        "production. Does not change the slicer and does not certify strength.",
+        priority_properties,
+        ["scenario"],
+        adapter.plan_manufacturing,
+    )
     cost_properties = {
         "machine_hour_rate_rub": NUMBER,
         "material_prices_rub_per_kg": {
@@ -178,6 +194,45 @@ def build_registry(registry, adapter):
         "Compare previously captured baseline and candidate costs and measured settings. "
         "Warn if tariffs or scene objects differ; does not apply settings.",
         {}, [], adapter.compare_cost_variants,
+    )
+    manufacturing_properties = dict(cost_properties)
+    manufacturing_properties.update({
+        "scenario": {"type": "string", "enum": ["prototype", "production"]},
+        "quantity": {"type": "integer", "minimum": 1},
+        "parts_per_job": {"type": "integer", "minimum": 1},
+        "machine_count": {"type": "integer", "minimum": 1},
+        "batch_setup_cost_rub": NUMBER,
+        "per_part_extra_cost_rub": NUMBER,
+        "reserve_percent": {"type": "number", "minimum": 0, "maximum": 100},
+        "observations": {
+            "type": "object",
+            "properties": {
+                "first_layer_contact_area_mm2": NUMBER,
+                "longest_bridge_mm": NUMBER,
+                "max_unsupported_overhang_deg": {
+                    "type": "number", "minimum": 0, "maximum": 90,
+                },
+                "enclosure": {"type": "boolean"},
+                "material_dry": {"type": "boolean"},
+                "bed_clean": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    })
+    registry.add(
+        "capture_manufacturing_scenario",
+        "Capture the completed live slice as prototype or production, including actual "
+        "settings, cost, risk, batch quantity, reserve and multi-printer schedule.",
+        manufacturing_properties,
+        cost_required + ["scenario", "quantity", "parts_per_job"],
+        adapter.capture_manufacturing,
+        False,
+    )
+    registry.add(
+        "compare_manufacturing_scenarios",
+        "Compare captured prototype and production scenarios by settings, actual slice facts, "
+        "cost, schedule and screening risk.",
+        {}, [], adapter.compare_manufacturing,
     )
     registry.add(
         "export_gcode",

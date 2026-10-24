@@ -24,6 +24,11 @@ from steslicer.Settings.ExtruderManager import ExtruderManager
 
 from ..core.errors import ToolError
 from ..core.economics import estimate_print_cost, compare_cost_variants
+from ..core.manufacturing import (
+    capture_manufacturing_scenario,
+    compare_manufacturing_scenarios,
+    plan_manufacturing_settings,
+)
 from ..core.risk import assess_print_risk
 
 
@@ -73,6 +78,7 @@ class SteSlicerAdapter(object):
         self._executor = executor
         self._nodes = {}
         self._cost_variants = {}
+        self._manufacturing_scenarios = {}
 
     def _on_qt(self, function, *args):
         return self._executor.call(function, *args)
@@ -329,15 +335,20 @@ class SteSlicerAdapter(object):
         return self._on_qt(self._assess_risk, args)
 
     def _assess_risk(self, args):
+        return assess_print_risk(self._manufacturing_snapshot(), args.get("observations") or {})
+
+    def _manufacturing_snapshot(self):
         stack = self._stack()
         slicing = self._slice_status()
         settings = {}
         for key in (
             "layer_height", "line_width", "machine_nozzle_size", "nozzle_size",
-            "wall_line_count", "infill_sparse_density", "support_enable", "support_angle",
-            "adhesion_type", "material_print_temperature", "material_bed_temperature",
-            "print_speed", "speed_print_layer_0", "travel_speed", "cool_fan_enabled",
-            "cool_fan_speed", "machine_buildplate_type", "build_plate_surface",
+            "wall_line_count", "wall_thickness", "top_layers", "bottom_layers",
+            "infill_sparse_density", "infill_pattern", "support_enable", "support_type",
+            "support_angle", "adhesion_type", "material_print_temperature",
+            "material_bed_temperature", "print_speed", "speed_print_layer_0",
+            "travel_speed", "cool_fan_enabled", "cool_fan_speed",
+            "machine_buildplate_type", "build_plate_surface",
         ):
             value = stack.getProperty(key, "value")
             if value is not None:
@@ -362,7 +373,30 @@ class SteSlicerAdapter(object):
             "settings": settings,
             "slicing": slicing,
         }
-        return assess_print_risk(snapshot, args.get("observations") or {})
+        return snapshot
+
+    def plan_manufacturing(self, args):
+        return self._on_qt(self._plan_manufacturing, args)
+
+    def _plan_manufacturing(self, args):
+        return plan_manufacturing_settings(self._manufacturing_snapshot(), args)
+
+    def capture_manufacturing(self, args):
+        return self._on_qt(self._capture_manufacturing, args)
+
+    def _capture_manufacturing(self, args):
+        result = capture_manufacturing_scenario(self._manufacturing_snapshot(), args)
+        self._manufacturing_scenarios[args["scenario"]] = copy.deepcopy(result)
+        return result
+
+    def compare_manufacturing(self, unused=None):
+        return self._on_qt(self._compare_manufacturing)
+
+    def _compare_manufacturing(self):
+        return compare_manufacturing_scenarios(
+            self._manufacturing_scenarios.get("prototype"),
+            self._manufacturing_scenarios.get("production"),
+        )
 
     def estimate_print_cost(self, args):
         return self._on_qt(self._estimate_print_cost, args)

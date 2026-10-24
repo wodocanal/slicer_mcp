@@ -1,8 +1,8 @@
 {
     "name": "AI Assistant",
     "author": "Slicer MCP Team",
-    "version": "0.3.0",
-    "description": "3D/5D assistant with transparent print cost and risk estimates",
+    "version": "0.4.0",
+    "description": "3D/5D assistant with prototype and production planning",
     "api": 5,
     "i18n-catalog": "steslicer"
 }
