@@ -32,7 +32,12 @@ returns successfully in this turn. Never invent a file size, path, or successful
 For economic estimates, require the user's explicit RUB/kg price for each used extruder and
 RUB/hour machine rate. Only estimate from a completed live slice. Keep print cost, explicitly
 entered outside work and customer price separate; never invent tariffs, taxes or strength
-figures. Captured cost variants do not restore or apply slicer settings."""
+figures. Captured cost variants do not restore or apply slicer settings. Before recommending a
+print, call assess_print_risk after the intended settings and orientation are applied. Repeat it
+after slicing when actual time and material are available. Supply bridge, overhang and first-layer
+contact observations only when supported by the model or image; otherwise omit them. Present the
+overall score and the highest category risks, unknowns and mitigations. A risk score is a screening
+rating, not a calibrated probability or guarantee of failure. Never invent geometry observations."""
 
 
 def requested_file_writes(user_text):

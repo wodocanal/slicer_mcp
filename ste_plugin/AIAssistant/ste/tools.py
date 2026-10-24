@@ -113,6 +113,30 @@ def build_registry(registry, adapter):
         [],
         adapter.slicing_status,
     )
+    registry.add(
+        "assess_print_risk",
+        "Calculate a transparent 0-100 print-risk rating from live STE settings, scene, "
+        "material and completed slice facts. Optional geometry observations must be measured "
+        "or visually supported; omitted facts are reported as unknown.",
+        {
+            "observations": {
+                "type": "object",
+                "properties": {
+                    "first_layer_contact_area_mm2": NUMBER,
+                    "longest_bridge_mm": NUMBER,
+                    "max_unsupported_overhang_deg": {
+                        "type": "number", "minimum": 0, "maximum": 90,
+                    },
+                    "enclosure": {"type": "boolean"},
+                    "material_dry": {"type": "boolean"},
+                    "bed_clean": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        [],
+        adapter.assess_risk,
+    )
     cost_properties = {
         "machine_hour_rate_rub": NUMBER,
         "material_prices_rub_per_kg": {

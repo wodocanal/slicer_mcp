@@ -24,6 +24,7 @@ from steslicer.Settings.ExtruderManager import ExtruderManager
 
 from ..core.errors import ToolError
 from ..core.economics import estimate_print_cost, compare_cost_variants
+from ..core.risk import assess_print_risk
 
 
 ALLOWED_SETTINGS = set(
@@ -265,6 +266,7 @@ class SteSlicerAdapter(object):
                     "id": node_id,
                     "name": node.getName(),
                     "dimensions_mm": [bounds.width, bounds.height, bounds.depth],
+                    "footprint_bbox_mm2": bounds.width * bounds.depth,
                     "position": [position.x, position.y, position.z],
                     "scale": [scale.x, scale.y, scale.z],
                     "build_plate": node.callDecoration("getBuildPlateNumber"),
@@ -322,6 +324,45 @@ class SteSlicerAdapter(object):
 
     def slicing_status(self, unused=None):
         return self._on_qt(self._slice_status)
+
+    def assess_risk(self, args):
+        return self._on_qt(self._assess_risk, args)
+
+    def _assess_risk(self, args):
+        stack = self._stack()
+        slicing = self._slice_status()
+        settings = {}
+        for key in (
+            "layer_height", "line_width", "machine_nozzle_size", "nozzle_size",
+            "wall_line_count", "infill_sparse_density", "support_enable", "support_angle",
+            "adhesion_type", "material_print_temperature", "material_bed_temperature",
+            "print_speed", "speed_print_layer_0", "travel_speed", "cool_fan_enabled",
+            "cool_fan_speed", "machine_buildplate_type", "build_plate_surface",
+        ):
+            value = stack.getProperty(key, "value")
+            if value is not None:
+                settings[key] = value
+        material_names = slicing.get("material_names") or []
+        manager = self._app.getMachineManager()
+        material_name = ", ".join(str(item) for item in material_names)
+        if not material_name:
+            active_material = manager.activeMaterialId
+            for material in ContainerRegistry.getInstance().findInstanceContainers(type="material"):
+                root_id = material.getMetaDataEntry("base_file", material.getId())
+                if root_id == active_material or material.getId() == active_material:
+                    material_name = "%s %s" % (
+                        material.getMetaDataEntry("material", ""), material.getName()
+                    )
+                    break
+        snapshot = {
+            "printing_mode": stack.getProperty("printing_mode", "value"),
+            "material_id": manager.activeMaterialId,
+            "material_name": material_name or str(manager.activeMaterialId or ""),
+            "objects": self._list_objects(),
+            "settings": settings,
+            "slicing": slicing,
+        }
+        return assess_print_risk(snapshot, args.get("observations") or {})
 
     def estimate_print_cost(self, args):
         return self._on_qt(self._estimate_print_cost, args)
@@ -524,4 +565,5 @@ class SteSlicerAdapter(object):
             "name": node.getName(),
             "position": [position.x, position.y, position.z],
             "dimensions_mm": [bounds.width, bounds.height, bounds.depth],
+            "footprint_bbox_mm2": bounds.width * bounds.depth,
         }
