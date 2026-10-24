@@ -235,6 +235,71 @@ def build_registry(registry, adapter):
         {}, [], adapter.compare_manufacturing,
     )
     registry.add(
+        "get_optimization_capabilities",
+        "Check the optional topology-optimization bridge, Mechanical installation, license "
+        "launch and prepared templates. A deep check can start Mechanical and consume a license.",
+        {"deep": {"type": "boolean", "default": True}},
+        [], adapter.optimization_capabilities,
+    )
+    registry.add(
+        "list_optimization_templates",
+        "List prepared, allowlisted Ansys topology-optimization workflows and their required inputs.",
+        {}, [], adapter.optimization_templates,
+    )
+    registry.add(
+        "start_topology_optimization",
+        "Start a prepared Ansys workflow with an explicit source model, material, loads, fixtures, "
+        "preserved regions, objective and FDM manufacturing constraints.",
+        {"specification": {"type": "object"}},
+        ["specification"], adapter.start_optimization, False,
+    )
+    registry.add(
+        "get_topology_optimization_status",
+        "Read status, errors, engineering results and artifacts for one optimization job.",
+        {"job_id": STRING}, ["job_id"], adapter.optimization_status,
+    )
+    registry.add(
+        "cancel_topology_optimization",
+        "Cancel a running optimization job and request that its Mechanical process stop.",
+        {"job_id": STRING}, ["job_id"], adapter.cancel_optimization, False,
+    )
+    registry.add(
+        "import_optimized_variant",
+        "Import the optimized STL from a completed bridge job into the live STE scene as a new variant.",
+        {"job_id": STRING}, ["job_id"], adapter.import_optimized_variant, False,
+    )
+    optimization_variant = dict(cost_properties)
+    optimization_variant.update({
+        "slot": {"type": "string", "enum": ["baseline", "optimized"]},
+        "label": STRING,
+        "observations": {
+            "type": "object",
+            "properties": {
+                "first_layer_contact_area_mm2": NUMBER,
+                "longest_bridge_mm": NUMBER,
+                "max_unsupported_overhang_deg": {
+                    "type": "number", "minimum": 0, "maximum": 90,
+                },
+                "enclosure": {"type": "boolean"},
+                "material_dry": {"type": "boolean"},
+                "bed_clean": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    })
+    registry.add(
+        "capture_optimization_variant",
+        "Capture a completed baseline or optimized STE slice with settings, cost and print risk.",
+        optimization_variant, cost_required + ["slot"],
+        adapter.capture_optimization_variant, False,
+    )
+    registry.add(
+        "compare_optimization_variants",
+        "Compare captured original and optimized slices by time, material, cost, settings and risk. "
+        "This does not certify structural strength.",
+        {}, [], adapter.compare_optimization,
+    )
+    registry.add(
         "export_gcode",
         "Export finished G-code to an explicit local path.",
         {"path": STRING},

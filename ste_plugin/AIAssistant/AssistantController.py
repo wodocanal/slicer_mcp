@@ -19,6 +19,7 @@ class AssistantController(QObject):
     settingsChanged = pyqtSignal()
     attachmentChanged = pyqtSignal()
     economicsChanged = pyqtSignal()
+    optimizationChanged = pyqtSignal()
 
     def __init__(self, application, registry, mcp_server, parent=None):
         QObject.__init__(self, parent)
@@ -32,11 +33,17 @@ class AssistantController(QObject):
         self._busy = False
         self._economics = {"slicing": None, "quote": None, "baseline": None,
                            "candidate": None, "comparison": None, "error": ""}
+        self._optimization = {"checking": False, "capabilities": None,
+                              "templates": [], "error": ""}
         preferences = application.getPreferences()
         preferences.addPreference("ai_assistant/base_url", DEFAULT_BASE_URL)
         preferences.addPreference("ai_assistant/api_key", "")
         preferences.addPreference("ai_assistant/model", DEFAULT_MODEL)
         preferences.addPreference("ai_assistant/history", "[]")
+        preferences.addPreference(
+            "ai_assistant/optimization_url", "http://127.0.0.1:8765"
+        )
+        preferences.addPreference("ai_assistant/optimization_token", "")
         self._preferences = preferences
         self._load_history()
 
@@ -69,6 +76,51 @@ class AssistantController(QObject):
     @pyqtProperty(str, notify=economicsChanged)
     def economicsJson(self):
         return json.dumps(self._economics, ensure_ascii=False)
+
+    @pyqtProperty(str, notify=optimizationChanged)
+    def optimizationJson(self):
+        return json.dumps(self._optimization, ensure_ascii=False)
+
+    @pyqtProperty(str, notify=optimizationChanged)
+    def optimizationUrl(self):
+        return self._preferences.getValue("ai_assistant/optimization_url") or ""
+
+    @pyqtProperty(str, notify=optimizationChanged)
+    def optimizationToken(self):
+        return self._preferences.getValue("ai_assistant/optimization_token") or ""
+
+    @pyqtSlot(str, str)
+    def saveOptimizationSettings(self, url, token):
+        self._preferences.setValue("ai_assistant/optimization_url", url.strip())
+        self._preferences.setValue("ai_assistant/optimization_token", token.strip())
+        self._optimization = {"checking": False, "capabilities": None,
+                              "templates": [], "error": "Настройки сохранены; запустите проверку."}
+        self.optimizationChanged.emit()
+
+    @pyqtSlot()
+    def refreshOptimization(self):
+        if self._optimization["checking"]:
+            return
+        self._optimization["checking"] = True
+        self._optimization["error"] = ""
+        self.optimizationChanged.emit()
+        thread = threading.Thread(target=self._check_optimization)
+        thread.daemon = True
+        thread.start()
+
+    def _check_optimization(self):
+        try:
+            capabilities = self._registry.call("get_optimization_capabilities", {"deep": True})
+            templates = self._registry.call("list_optimization_templates", {})
+            self._app.callLater(self._finish_optimization_check, capabilities,
+                                templates.get("templates", []), "")
+        except Exception as error:
+            self._app.callLater(self._finish_optimization_check, None, [], str(error))
+
+    def _finish_optimization_check(self, capabilities, templates, error):
+        self._optimization = {"checking": False, "capabilities": capabilities,
+                              "templates": templates, "error": error}
+        self.optimizationChanged.emit()
 
     @pyqtSlot()
     def refreshEconomics(self):

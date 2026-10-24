@@ -45,7 +45,16 @@ that wall count or infill proves strength. Apply and slice each scenario separat
 capture_manufacturing_scenario with explicit tariffs, quantity and parts per completed reference
 job. Capture both scenarios before comparing them. Treat reserve_percent as user-selected planning
 capacity, never as a predicted failure rate. For a batch, report total machine time separately from
-elapsed time across parallel printers."""
+elapsed time across parallel printers. Topology optimization is an optional beta workflow. Before
+offering or starting it, call get_optimization_capabilities and require status=ready, a prepared
+template, explicit material, loads, fixtures, preserved/design regions, objective and manufacturing
+constraints. Never invent these engineering inputs. Only start a template returned by
+list_optimization_templates. Poll its status at most twice per user request. Do not claim that Ansys
+ran, exported a model or validated strength unless the completed job reports that result. Import
+optimized geometry only through import_optimized_variant. Slice and capture the baseline and
+optimized variants separately with equal settings and tariffs before comparing them. Clearly
+separate Ansys engineering validation, slicer economics, print-risk screening and physical FDM
+testing."""
 
 
 def requested_file_writes(user_text):

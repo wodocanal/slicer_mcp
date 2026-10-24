@@ -10,6 +10,7 @@ from UM.PluginRegistry import PluginRegistry
 from .AssistantController import AssistantController
 from .core.jsonrpc import JsonRpcDispatcher
 from .core.mcp_server import McpHttpServer
+from .core.optimization import OptimizationBridgeClient
 from .core.tool_registry import ToolRegistry
 from .ste.adapter import SteSlicerAdapter
 from .ste.qt_executor import QtExecutor
@@ -30,8 +31,19 @@ class AIAssistant(QObject, Extension):
         self._initialize_core()
 
     def _initialize_core(self):
+        preferences = self._app.getPreferences()
+        preferences.addPreference(
+            "ai_assistant/optimization_url", "http://127.0.0.1:8765"
+        )
+        preferences.addPreference("ai_assistant/optimization_token", "")
+        optimization = OptimizationBridgeClient(
+            lambda: (
+                preferences.getValue("ai_assistant/optimization_url"),
+                preferences.getValue("ai_assistant/optimization_token"),
+            )
+        )
         executor = QtExecutor(self._app)
-        adapter = SteSlicerAdapter(self._app, executor)
+        adapter = SteSlicerAdapter(self._app, executor, optimization)
         registry = build_registry(ToolRegistry(), adapter)
         self._mcp_server = McpHttpServer(JsonRpcDispatcher(registry))
         try:

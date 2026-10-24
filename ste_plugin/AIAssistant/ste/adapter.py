@@ -29,6 +29,7 @@ from ..core.manufacturing import (
     compare_manufacturing_scenarios,
     plan_manufacturing_settings,
 )
+from ..core.optimization import compare_optimization_variants
 from ..core.risk import assess_print_risk
 
 
@@ -73,12 +74,14 @@ SAFE_NUMERIC_RANGES = {
 
 
 class SteSlicerAdapter(object):
-    def __init__(self, application, executor):
+    def __init__(self, application, executor, optimization=None):
         self._app = application
         self._executor = executor
         self._nodes = {}
         self._cost_variants = {}
         self._manufacturing_scenarios = {}
+        self._optimization = optimization
+        self._optimization_variants = {}
 
     def _on_qt(self, function, *args):
         return self._executor.call(function, *args)
@@ -397,6 +400,81 @@ class SteSlicerAdapter(object):
             self._manufacturing_scenarios.get("prototype"),
             self._manufacturing_scenarios.get("production"),
         )
+
+    def optimization_capabilities(self, args):
+        self._require_optimization()
+        return self._optimization.capabilities(args.get("deep", True))
+
+    def optimization_templates(self, unused=None):
+        self._require_optimization()
+        return self._optimization.templates()
+
+    def start_optimization(self, args):
+        self._require_optimization()
+        return self._optimization.start(args["specification"])
+
+    def optimization_status(self, args):
+        self._require_optimization()
+        return self._optimization.status(args["job_id"])
+
+    def cancel_optimization(self, args):
+        self._require_optimization()
+        return self._optimization.cancel(args["job_id"])
+
+    def import_optimized_variant(self, args):
+        self._require_optimization()
+        result = self._optimization.status(args["job_id"])
+        if result.get("status") != "completed":
+            raise ToolError("Optimization job is not completed")
+        path = (result.get("artifacts") or {}).get("optimized_stl")
+        if not path:
+            raise ToolError("Optimization result has no optimized_stl artifact")
+        imported = self.load_model({"path": path})
+        imported["job_id"] = args["job_id"]
+        imported["engineering_result"] = result.get("result")
+        return imported
+
+    def capture_optimization_variant(self, args):
+        return self._on_qt(self._capture_optimization_variant, args)
+
+    def _capture_optimization_variant(self, args):
+        slot = args.get("slot")
+        if slot not in ("baseline", "optimized"):
+            raise ToolError("slot must be baseline or optimized")
+        snapshot = self._manufacturing_snapshot()
+        quote = estimate_print_cost(snapshot["slicing"], args)
+        risk = assess_print_risk(snapshot, args.get("observations") or {})
+        tariffs = {
+            "machine_hour_rate_rub": quote["machine_hour_rate_rub"],
+            "material_prices_rub_per_kg": [
+                item["price_rub_per_kg"] for item in quote["materials"]
+            ],
+        }
+        captured = {
+            "slot": slot,
+            "label": str(args.get("label") or slot),
+            "quote": quote,
+            "risk": risk,
+            "tariffs": tariffs,
+            "settings": snapshot["settings"],
+            "objects": snapshot["objects"],
+            "printing_mode": snapshot["printing_mode"],
+        }
+        self._optimization_variants[slot] = copy.deepcopy(captured)
+        return captured
+
+    def compare_optimization(self, unused=None):
+        return self._on_qt(self._compare_optimization)
+
+    def _compare_optimization(self):
+        return compare_optimization_variants(
+            self._optimization_variants.get("baseline"),
+            self._optimization_variants.get("optimized"),
+        )
+
+    def _require_optimization(self):
+        if self._optimization is None:
+            raise ToolError("Optimization bridge is not configured")
 
     def estimate_print_cost(self, args):
         return self._on_qt(self._estimate_print_cost, args)

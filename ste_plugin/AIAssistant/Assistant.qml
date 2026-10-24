@@ -17,8 +17,10 @@ UM.Dialog {
 
     property bool settingsVisible: false
     property bool economicsVisible: false
+    property bool optimizationVisible: false
     property var chatMessages: []
     property var economics: ({})
+    property var optimization: ({})
 
     function refreshMessages() {
         try {
@@ -32,6 +34,7 @@ UM.Dialog {
     function showSettings() {
         settingsVisible = true
         economicsVisible = false
+        optimizationVisible = false
     }
 
     function refreshEconomicsData() {
@@ -40,6 +43,23 @@ UM.Dialog {
         } catch (error) {
             economics = ({error: "Не удалось прочитать данные сметы"})
         }
+    }
+
+    function refreshOptimizationData() {
+        try {
+            optimization = JSON.parse(manager.optimizationJson)
+        } catch (error) {
+            optimization = ({error: "Не удалось прочитать состояние интеграции"})
+        }
+    }
+
+    function optimizationTemplateSummary() {
+        var values = root.optimization.templates || []
+        var names = []
+        for (var i = 0; i < values.length; ++i) {
+            names.push(values[i].name || values[i].id)
+        }
+        return names.length ? names.join(", ") : "нет"
     }
 
     function asNumber(text) {
@@ -114,6 +134,7 @@ UM.Dialog {
     Component.onCompleted: {
         refreshMessages()
         refreshEconomicsData()
+        refreshOptimizationData()
     }
 
     ColumnLayout {
@@ -124,6 +145,7 @@ UM.Dialog {
             target: manager
             onMessagesChanged: root.refreshMessages()
             onEconomicsChanged: root.refreshEconomicsData()
+            onOptimizationChanged: root.refreshOptimizationData()
         }
 
         FileDialog {
@@ -155,8 +177,10 @@ UM.Dialog {
             Button {
                 text: "Чат"
                 checkable: true
-                checked: !root.settingsVisible && !root.economicsVisible
-                onClicked: { root.settingsVisible = false; root.economicsVisible = false }
+                checked: !root.settingsVisible && !root.economicsVisible &&
+                         !root.optimizationVisible
+                onClicked: { root.settingsVisible = false; root.economicsVisible = false;
+                             root.optimizationVisible = false }
             }
             Button {
                 text: "Смета"
@@ -165,7 +189,18 @@ UM.Dialog {
                 onClicked: {
                     root.settingsVisible = false
                     root.economicsVisible = true
+                    root.optimizationVisible = false
                     manager.refreshEconomics()
+                }
+            }
+            Button {
+                text: "Оптимизация · beta"
+                checkable: true
+                checked: root.optimizationVisible
+                onClicked: {
+                    root.settingsVisible = false
+                    root.economicsVisible = false
+                    root.optimizationVisible = true
                 }
             }
             Button {
@@ -187,7 +222,8 @@ UM.Dialog {
 
             ColumnLayout {
                 anchors.fill: parent
-                visible: !root.settingsVisible && !root.economicsVisible
+                visible: !root.settingsVisible && !root.economicsVisible &&
+                         !root.optimizationVisible
                 spacing: 8 * screenScaleFactor
 
                 Rectangle {
@@ -570,6 +606,104 @@ UM.Dialog {
                     color: "#5b6770"
                 }
                 Item { Layout.fillHeight: true }
+            }
+
+            Flickable {
+                anchors.fill: parent
+                visible: root.optimizationVisible
+                clip: true
+                contentWidth: width
+                contentHeight: optimizationForm.implicitHeight + 20 * screenScaleFactor
+
+                ColumnLayout {
+                    id: optimizationForm
+                    x: 10 * screenScaleFactor
+                    y: 8 * screenScaleFactor
+                    width: parent.width - 20 * screenScaleFactor
+                    spacing: 8 * screenScaleFactor
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Оптимизация конструкции · beta"
+                        font.bold: true
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Требуются отдельный Ansys bridge, установленный Mechanical, " +
+                              "подходящая лицензия и подготовленный расчётный шаблон. " +
+                              "Проверка может кратковременно занять лицензию Mechanical."
+                    }
+                    Label { text: "Bridge URL" }
+                    TextField {
+                        id: optimizationUrl
+                        Layout.fillWidth: true
+                        text: manager.optimizationUrl
+                        placeholderText: "http://127.0.0.1:8765"
+                    }
+                    Label { text: "X-Bridge-Token" }
+                    TextField {
+                        id: optimizationToken
+                        Layout.fillWidth: true
+                        text: manager.optimizationToken
+                        echoMode: showOptimizationToken.checked ? TextInput.Normal : TextInput.Password
+                    }
+                    CheckBox {
+                        id: showOptimizationToken
+                        text: "Показать токен"
+                    }
+                    RowLayout {
+                        Button {
+                            text: "Сохранить подключение"
+                            onClicked: manager.saveOptimizationSettings(
+                                optimizationUrl.text, optimizationToken.text)
+                        }
+                        Button {
+                            text: root.optimization.checking ? "Проверяется…" : "Проверить Ansys"
+                            enabled: !root.optimization.checking
+                            onClicked: manager.refreshOptimization()
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: root.optimization.error && root.optimization.error.length > 0
+                        text: "Ошибка: " + (root.optimization.error || "")
+                        color: "#bb3030"
+                        wrapMode: Text.Wrap
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        color: "#202830"
+                        text: {
+                            var c = root.optimization.capabilities
+                            if (!c) return "Подключение ещё не проверено."
+                            return "Bridge: " + c.status + "\n" +
+                                   "PyMechanical: " + (c.pymechanical_available ? "найден" : "нет") + "\n" +
+                                   "Mechanical: " + (c.mechanical_found ? "найден" : "нет") + "\n" +
+                                   "Лицензия/запуск: " +
+                                       (c.license_available === true ? "доступны" :
+                                        c.license_available === false ? "недоступны" : "не проверены") + "\n" +
+                                   "Готовых шаблонов: " + c.templates_ready +
+                                   (c.reason ? "\nПричина: " + c.reason : "")
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Шаблоны: " + root.optimizationTemplateSummary()
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "После успешной проверки запустите подготовленный расчёт через чат. " +
+                              "Плагин импортирует STL только из завершённого задания. Исходный и " +
+                              "оптимизированный варианты нужно прослайсить отдельно для сравнения."
+                        wrapMode: Text.Wrap
+                        color: "#5b6770"
+                    }
+                    Item { Layout.fillHeight: true }
+                }
             }
         }
     }
