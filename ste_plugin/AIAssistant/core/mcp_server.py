@@ -2,6 +2,7 @@
 
 import json
 import threading
+import uuid
 
 try:
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -21,6 +22,11 @@ class McpHttpServer(object):
         self._dispatcher = dispatcher
         self._server = None
         self._thread = None
+        self._token = uuid.uuid4().hex
+
+    @property
+    def token(self):
+        return self._token
 
     @property
     def port(self):
@@ -30,6 +36,7 @@ class McpHttpServer(object):
         if self._server:
             return self.port
         dispatcher = self._dispatcher
+        token = self._token
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -41,6 +48,9 @@ class McpHttpServer(object):
             def do_POST(self):
                 if self.path != "/mcp":
                     self.send_error(404)
+                    return
+                if self.headers.get("X-Session-Token") != token:
+                    self._send(403, {"error": "MCP token required"})
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
@@ -58,6 +68,7 @@ class McpHttpServer(object):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
                 self.wfile.write(body)
 

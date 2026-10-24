@@ -74,7 +74,10 @@ def test_loopback_http_transport():
             Request(
                 f"http://127.0.0.1:{port}/mcp",
                 data=body,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Session-Token": server.token,
+                },
             )
         )
         assert json.loads(response.read())["result"]["tools"][0]["name"] == "add"

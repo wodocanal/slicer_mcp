@@ -29,7 +29,7 @@ def build_registry(registry, adapter):
     )
     registry.add(
         "set_print_mode",
-        "Switch between 3D classic, 5D Spiral and 5D Spiral Full.",
+        "Switch between classic = 3D, cylindrical = 5D Spiral and cylindrical_full = 5D.",
         {"mode": {"type": "string", "enum": ["classic", "cylindrical", "cylindrical_full"]}},
         ["mode"],
         adapter.set_print_mode,
@@ -112,6 +112,48 @@ def build_registry(registry, adapter):
         {},
         [],
         adapter.slicing_status,
+    )
+    cost_properties = {
+        "machine_hour_rate_rub": NUMBER,
+        "material_prices_rub_per_kg": {
+            "type": "array", "items": NUMBER,
+            "description": "RUB per kg, one entry per extruder slot; 0 for unused slots",
+        },
+        "outside_work_items": {
+            "type": "array",
+            "items": {"type": "object", "properties": {
+                "label": STRING, "amount_rub": NUMBER,
+            }, "required": ["label", "amount_rub"]},
+        },
+        "markup_rub": NUMBER,
+        "tax_rub": NUMBER,
+        "target_budget_rub": NUMBER,
+    }
+    cost_required = ["machine_hour_rate_rub", "material_prices_rub_per_kg"]
+    registry.add(
+        "estimate_print_cost",
+        "Estimate print cost from a completed live slice and explicit user tariffs. "
+        "Returns print cost, separately entered outside work, and customer price; "
+        "does not infer rates or strength.",
+        cost_properties, cost_required, adapter.estimate_print_cost,
+    )
+    variant_properties = dict(cost_properties)
+    variant_properties.update({
+        "slot": {"type": "string", "enum": ["baseline", "candidate"]},
+        "label": STRING,
+    })
+    registry.add(
+        "capture_cost_variant",
+        "Capture a completed live slice, its settings and quote as baseline or candidate. "
+        "Does not change or restore the project.",
+        variant_properties, cost_required + ["slot"], adapter.capture_cost_variant,
+        False,
+    )
+    registry.add(
+        "compare_cost_variants",
+        "Compare previously captured baseline and candidate costs and measured settings. "
+        "Warn if tariffs or scene objects differ; does not apply settings.",
+        {}, [], adapter.compare_cost_variants,
     )
     registry.add(
         "export_gcode",

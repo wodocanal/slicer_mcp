@@ -9,11 +9,16 @@ from UM.Logger import Logger
 from .core.llm import Agent, ChatClient
 
 
+DEFAULT_BASE_URL = "https://api.timeweb.ai/v1"
+DEFAULT_MODEL = "dashscope/qwen3.8-flash"
+
+
 class AssistantController(QObject):
     messagesChanged = pyqtSignal()
     busyChanged = pyqtSignal()
     settingsChanged = pyqtSignal()
     attachmentChanged = pyqtSignal()
+    economicsChanged = pyqtSignal()
 
     def __init__(self, application, registry, mcp_server, parent=None):
         QObject.__init__(self, parent)
@@ -23,11 +28,14 @@ class AssistantController(QObject):
         self._messages = []
         self._history = []
         self._attachments = []
+        self._attachment_error = ""
         self._busy = False
+        self._economics = {"slicing": None, "quote": None, "baseline": None,
+                           "candidate": None, "comparison": None, "error": ""}
         preferences = application.getPreferences()
-        preferences.addPreference("ai_assistant/base_url", "")
+        preferences.addPreference("ai_assistant/base_url", DEFAULT_BASE_URL)
         preferences.addPreference("ai_assistant/api_key", "")
-        preferences.addPreference("ai_assistant/model", "")
+        preferences.addPreference("ai_assistant/model", DEFAULT_MODEL)
         preferences.addPreference("ai_assistant/history", "[]")
         self._preferences = preferences
         self._load_history()
@@ -55,12 +63,60 @@ class AssistantController(QObject):
     @pyqtProperty(str, notify=attachmentChanged)
     def attachmentLabel(self):
         if not self._attachments:
-            return "Файлы не выбраны"
+            return self._attachment_error or "Файлы не выбраны"
         return ", ".join(os.path.basename(path) for path in self._attachments)
+
+    @pyqtProperty(str, notify=economicsChanged)
+    def economicsJson(self):
+        return json.dumps(self._economics, ensure_ascii=False)
+
+    @pyqtSlot()
+    def refreshEconomics(self):
+        try:
+            self._economics["slicing"] = self._registry.call("get_slicing_status", {})
+            self._economics["quote"] = None
+            self._economics["error"] = ""
+        except Exception as error:
+            self._economics["slicing"] = None
+            self._economics["quote"] = None
+            self._economics["error"] = str(error)
+        self.economicsChanged.emit()
+
+    @pyqtSlot(str)
+    def calculateEconomics(self, payload):
+        try:
+            arguments = json.loads(payload)
+            self._economics["quote"] = self._registry.call("estimate_print_cost", arguments)
+            self._economics["slicing"] = self._registry.call("get_slicing_status", {})
+            self._economics["error"] = ""
+        except Exception as error:
+            self._economics["quote"] = None
+            self._economics["error"] = str(error)
+        self.economicsChanged.emit()
+
+    @pyqtSlot(str)
+    def captureEconomics(self, payload):
+        try:
+            arguments = json.loads(payload)
+            snapshot = self._registry.call("capture_cost_variant", arguments)
+            self._economics[snapshot["slot"]] = snapshot
+            self._economics["quote"] = snapshot["quote"]
+            self._economics["slicing"] = self._registry.call("get_slicing_status", {})
+            if self._economics["baseline"] and self._economics["candidate"]:
+                self._economics["comparison"] = self._registry.call(
+                    "compare_cost_variants", {})
+            self._economics["error"] = ""
+        except Exception as error:
+            self._economics["error"] = str(error)
+        self.economicsChanged.emit()
 
     @pyqtProperty(int, constant=True)
     def mcpPort(self):
         return self._mcp_server.port
+
+    @pyqtProperty(str, constant=True)
+    def mcpToken(self):
+        return self._mcp_server.token
 
     @pyqtSlot(str, str, str)
     def saveSettings(self, base_url, api_key, model):
@@ -79,11 +135,25 @@ class AssistantController(QObject):
             if path and os.path.isfile(path):
                 result.append(path)
         self._attachments = result[:8]
+        self._attachment_error = "" if result else "Не удалось прикрепить выбранный файл"
         self.attachmentChanged.emit()
+
+    @pyqtSlot(str)
+    def setAttachmentsJson(self, payload):
+        try:
+            urls = json.loads(payload)
+            if not isinstance(urls, list):
+                raise ValueError("Expected a list of file URLs")
+            self.setAttachments(urls)
+        except (ValueError, TypeError):
+            self._attachments = []
+            self._attachment_error = "Ошибка чтения выбранных файлов"
+            self.attachmentChanged.emit()
 
     @pyqtSlot()
     def clearAttachments(self):
         self._attachments = []
+        self._attachment_error = ""
         self.attachmentChanged.emit()
 
     @pyqtSlot()
@@ -104,7 +174,10 @@ class AssistantController(QObject):
         self.clearAttachments()
         self._append("user", text, "message", attachments)
         self._set_busy(True)
-        thread = threading.Thread(target=self._run_agent, args=(text, attachments))
+        connection = (self.baseUrl, self.apiKey, self.model)
+        history = list(self._history)
+        thread = threading.Thread(target=self._run_agent,
+                                  args=(text, attachments, connection, history))
         thread.daemon = True
         thread.start()
 
@@ -119,11 +192,11 @@ class AssistantController(QObject):
         except Exception as error:
             return json.dumps({"error": str(error)}, ensure_ascii=False)
 
-    def _run_agent(self, text, attachments):
+    def _run_agent(self, text, attachments, connection, history):
         try:
-            client = ChatClient(self.baseUrl, self.apiKey, self.model)
+            client = ChatClient(*connection)
             agent = Agent(client, self._registry, self._on_agent_event)
-            answer = agent.run(list(self._history), text, attachments)
+            answer = agent.run(history, text, attachments)
             self._app.callLater(self._finish_success, text, answer)
         except Exception as error:
             Logger.logException("e", "AI Assistant request failed")
