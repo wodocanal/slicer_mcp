@@ -1,0 +1,33 @@
+{
+  "models": [
+    {
+      "name": "01-gear",
+      "path": "../inputs/01-gear/model.stl",
+      "mode": "classic",
+      "material": "generic_pla_175",
+      "quality": "fast"
+    },
+    {
+      "name": "conveyor-wheel",
+      "path": "../inputs/conveyor-wheel/model.stl",
+      "mode": "cylindrical_full",
+      "rotary_axis": "Z",
+      "material": "generic_pla_175",
+      "quality": "fast",
+      "settings": {
+        "cylindrical_mode_base_diameter": 20
+      }
+    },
+    {
+      "name": "simple-cylinder",
+      "path": "../inputs/simple-cylinder/model.stl",
+      "mode": "cylindrical_full",
+      "rotary_axis": "Z",
+      "material": "generic_pla_175",
+      "quality": "fast",
+      "settings": {
+        "cylindrical_mode_base_diameter": 20
+      }
+    }
+  ]
+}

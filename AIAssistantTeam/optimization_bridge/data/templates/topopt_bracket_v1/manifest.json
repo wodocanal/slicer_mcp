@@ -1,0 +1,17 @@
+{
+  "id": "topopt_bracket_v1",
+  "name": "TopOpt SIMP: консольная деталь v1",
+  "description": "Подготовленный 2D SIMP-шаблон для призматической консольной детали: левая грань закреплена, нагрузка приложена справа. Результат требует инженерной проверки перед производством.",
+  "required_inputs": [
+    "material_id",
+    "load_n",
+    "target_mass_percent"
+  ],
+  "source_extensions": [
+    ".stl"
+  ],
+  "python_dependencies": [
+    "numpy"
+  ],
+  "validation_level": "geometry_candidate_only"
+}

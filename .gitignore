@@ -1,9 +1,13 @@
 .venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
-.slicer-mcp/
-.codex/config.toml
 .DS_Store
+*.log
+AIAssistantTeam/optimization_bridge/data/jobs/*
+!AIAssistantTeam/optimization_bridge/data/jobs/.gitkeep
+.slicer-mcp/
+.codex/
 dist/

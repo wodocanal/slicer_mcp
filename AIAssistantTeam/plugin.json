@@ -1,0 +1,8 @@
+{
+    "name": "AI Assistant (команда)",
+    "author": "Slicer MCP Team",
+    "version": "0.7.6",
+    "description": "3D/5D assistant with prototype planning and local TopOpt optimization bridge",
+    "api": 5,
+    "i18n-catalog": "steslicer"
+}

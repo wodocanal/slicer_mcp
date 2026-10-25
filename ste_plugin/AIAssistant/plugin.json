@@ -1,8 +1,0 @@
-{
-    "name": "AI Assistant",
-    "author": "Slicer MCP Team",
-    "version": "0.7.0",
-    "description": "3D/5D assistant with spatial risk maps and failure-cost scenarios",
-    "api": 5,
-    "i18n-catalog": "steslicer"
-}

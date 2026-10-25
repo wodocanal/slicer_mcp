@@ -1,0 +1,109 @@
+{
+  "model": "01-gear",
+  "source": "C:\\Users\\User\\Documents\\Codex\\2026-10-16\\new-chat\\inputs\\case-models\\01-gear\\model.stl",
+  "status": "completed",
+  "mode": "classic",
+  "material": "generic_pla_175",
+  "quality": "fast",
+  "object": {
+    "dimensions_mm": [
+      33.0992546081543,
+      33.0992546081543,
+      10.100000381469727
+    ],
+    "footprint_bbox_mm2": 334.302484168722,
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "build_plate": 0,
+    "id": "2436978240424",
+    "name": "model.stl",
+    "position": [
+      0.0,
+      16.54962730407715,
+      0.0
+    ]
+  },
+  "orientation": {
+    "orientation": {
+      "before": {
+        "contact_area_mm2": 3.84,
+        "height_mm": 33.1,
+        "score": -2.58,
+        "bounding_footprint_mm2": 334.3,
+        "downward_face_area_mm2": 366.97
+      },
+      "after": {
+        "contact_area_mm2": 729.48,
+        "height_mm": 10.1,
+        "score": 88.8,
+        "bounding_footprint_mm2": 1095.56,
+        "downward_face_area_mm2": 0.0
+      },
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "confidence": "high",
+      "changed": true,
+      "reason": "A larger stable contact face and lower unsupported area were found.",
+      "note": "Estimated triangle contact is a heuristic; verify the preview and support needs.",
+      "angle_deg": 90.0
+    },
+    "printing_mode": "classic",
+    "object": {
+      "dimensions_mm": [
+        33.0992546081543,
+        10.100000381469727,
+        33.0992546081543
+      ],
+      "footprint_bbox_mm2": 1095.5606556154235,
+      "id": "2436978240424",
+      "name": "model.stl",
+      "position": [
+        0.0,
+        5.050000190734863,
+        0.0
+      ]
+    }
+  },
+  "slicing": {
+    "material_lengths_m": [
+      1.31,
+      0.0
+    ],
+    "material_names": [
+      "PLA",
+      "PLA"
+    ],
+    "material_weights_g": [
+      3.9084206640624997,
+      0.0
+    ],
+    "state": "done",
+    "print_time": "00:43:25",
+    "print_time_seconds": 2605
+  },
+  "project": {
+    "path": "C:\\Users\\User\\Documents\\Codex\\2026-10-16\\new-chat\\inputs\\slicer_mcp\\results\\01-gear\\project.3mf",
+    "bytes": 511329
+  },
+  "gcode": {
+    "path": "C:\\Users\\User\\Documents\\Codex\\2026-10-16\\new-chat\\inputs\\slicer_mcp\\results\\01-gear\\result.gcode",
+    "bytes": 3361455,
+    "commands": {
+      "G28": false,
+      "G1": true,
+      "M104/M109": true,
+      "M140/M190": true
+    },
+    "warnings": [
+      "G28 is absent; accepted for a Stereotech profile"
+    ]
+  },
+  "elapsed_seconds": 22.453,
+  "screenshots": []
+}
