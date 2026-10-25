@@ -43,7 +43,10 @@ from ..core.optimization import (
 )
 from ..core.placement import centered_scene_build_area, choose_adjacent_offset
 from ..core.risk import assess_print_risk
+from ..core.risk_map import analyze_geometry_risk_map
+from ..core.failure_cost import analyze_failure_cost
 from ..core.orientation import choose_orientation
+from ..core.printer_fleet import PrinterFleet, MoonrakerBackend
 
 
 ALLOWED_SETTINGS = set(
@@ -95,6 +98,11 @@ class SteSlicerAdapter(object):
         self._manufacturing_scenarios = {}
         self._optimization = optimization
         self._optimization_variants = {}
+        try:
+            self._printer_fleet = PrinterFleet.from_environment()
+        except Exception as error:
+            Logger.log("e", "Could not load STE printer fleet configuration: %s", error)
+            self._printer_fleet = PrinterFleet([])
         self._snapshot_lock = threading.RLock()
         self._objects_snapshot = None
         self._slicing_snapshot = None
@@ -103,6 +111,12 @@ class SteSlicerAdapter(object):
         self._snapshot_refresh_pending = False
         self._objects_read_refresh_pending = False
         self._slicing_read_refresh_pending = False
+        self._slice_generation = 0
+        self._slice_requested_at = None
+        self._slice_last_progress_at = None
+        self._slice_stage = "idle"
+        self._slice_terminal_state = None
+        self._slice_last_error = None
         # Prime read-only snapshots once the application event loop is ready.
         self._executor.submit(self._initialize_read_snapshots)
 
@@ -377,6 +391,72 @@ class SteSlicerAdapter(object):
         return {"object": self._object_result(node), "orientation": choice,
                 "printing_mode": mode}
 
+    def prepare_scene_5d(self, args):
+        return self._on_qt(self._prepare_scene_5d, args)
+
+    def _prepare_scene_5d(self, args):
+        mode = self._stack().getProperty("printing_mode", "value")
+        if mode not in ("cylindrical", "cylindrical_full"):
+            raise ToolError("prepare_scene_5d requires a cylindrical 5D print mode")
+        node = self._node(args["object_id"])
+        source_axis = str(args.get("source_axis", "Z")).upper()
+        target_axis = str(args.get("target_scene_axis", "Y")).upper()
+        source_vectors = {
+            "X": Vector(1.0, 0.0, 0.0),
+            "Y": Vector(0.0, 0.0, -1.0),
+            "Z": Vector(0.0, 1.0, 0.0),
+        }
+        target_vectors = {
+            "X": Vector(1.0, 0.0, 0.0),
+            "Y": Vector(0.0, 1.0, 0.0),
+            "Z": Vector(0.0, 0.0, 1.0),
+        }
+        if source_axis not in source_vectors or target_axis not in target_vectors:
+            raise ToolError("source_axis and target_scene_axis must be X, Y or Z")
+        current = source_vectors[source_axis]
+        target = target_vectors[target_axis]
+        if abs(current.dot(target)) < 0.999999:
+            RotateOperation(node, Quaternion.rotationTo(current, target)).push()
+
+        bounds = node.getBoundingBox()
+        minimum = bounds.minimum
+        maximum = bounds.maximum
+        center = Vector((minimum.x + maximum.x) * 0.5,
+                        (minimum.y + maximum.y) * 0.5,
+                        (minimum.z + maximum.z) * 0.5)
+        if args.get("center_on_rotary_axis", True):
+            offsets = {"X": Vector(0.0, -center.y, -center.z),
+                       "Y": Vector(-center.x, 0.0, -center.z),
+                       "Z": Vector(-center.x, -center.y, 0.0)}
+            TranslateOperation(node, offsets[target_axis]).push()
+        if args.get("place_on_surface", True):
+            GravityOperation(node).push()
+        backend = self._app.getBackend()
+        if hasattr(backend, "markSliceAll"):
+            backend.markSliceAll()
+        result = self._object_result(node)
+        minimum = node.getBoundingBox().minimum
+        maximum = node.getBoundingBox().maximum
+        centers = {"X": ((minimum.y + maximum.y) * 0.5,
+                         (minimum.z + maximum.z) * 0.5),
+                   "Y": ((minimum.x + maximum.x) * 0.5,
+                         (minimum.z + maximum.z) * 0.5),
+                   "Z": ((minimum.x + maximum.x) * 0.5,
+                         (minimum.y + maximum.y) * 0.5)}
+        tolerance = float(args.get("center_tolerance_mm", 0.05))
+        radial_center = centers[target_axis]
+        result.update({
+            "prepared_for_5d": True,
+            "source_axis": source_axis,
+            "target_scene_axis": target_axis,
+            "rotary_center_mm": list(radial_center),
+            "center_tolerance_mm": tolerance,
+            "centered": max(abs(radial_center[0]), abs(radial_center[1])) <= tolerance,
+            "bounds_minimum": [minimum.x, minimum.y, minimum.z],
+            "bounds_maximum": [maximum.x, maximum.y, maximum.z],
+        })
+        return result
+
     def start_slicing(self, unused=None):
         return self._on_qt(self._start_slicing)
 
@@ -385,8 +465,22 @@ class SteSlicerAdapter(object):
         if getattr(backend, "_slicing", False):
             return {"started": False, "status": self._slice_status(),
                     "note": "Slicing is already running"}
-        backend.forceSlice()
-        return {"started": True, "status": self._slice_status()}
+        self._slice_generation = getattr(self, "_slice_generation", 0) + 1
+        now = time.time()
+        self._slice_requested_at = now
+        self._slice_last_progress_at = now
+        self._slice_stage = "preparing"
+        self._slice_terminal_state = None
+        self._slice_last_error = None
+        try:
+            backend.forceSlice()
+        except Exception as error:
+            self._slice_terminal_state = "error"
+            self._slice_last_error = str(error)
+            self._slice_stage = "failed_to_start"
+            raise
+        return {"started": True, "generation": self._slice_generation,
+                "status": self._slice_status()}
 
     def slicing_status(self, unused=None):
         snapshot = self._read_snapshot("slicing")
@@ -480,6 +574,26 @@ class SteSlicerAdapter(object):
     def _assess_risk(self, args):
         return assess_print_risk(self._manufacturing_snapshot(), args.get("observations") or {})
 
+    def analyze_risk_map(self, args):
+        return self._on_qt(self._analyze_risk_map, args)
+
+    def _analyze_risk_map(self, args):
+        objects = []
+        for node in self._scene_nodes():
+            mesh = node.getMeshDataTransformed()
+            if mesh is None:
+                continue
+            objects.append({
+                "object_id": str(id(node)), "name": node.getName(),
+                "vertices": self._mesh_rows(mesh.getVertices(), 3, float),
+                "triangles": (self._mesh_rows(mesh.getIndices(), 3, int)
+                              if mesh.hasIndices() else []),
+            })
+        return analyze_geometry_risk_map(objects, args)
+
+    def analyze_failure_cost(self, args):
+        return self._on_qt(analyze_failure_cost, self._slice_status(), args)
+
     def _manufacturing_snapshot(self):
         stack = self._stack()
         slicing = self._slice_status()
@@ -523,6 +637,18 @@ class SteSlicerAdapter(object):
 
     def _plan_manufacturing(self, args):
         return plan_manufacturing_settings(self._manufacturing_snapshot(), args)
+
+    def apply_manufacturing_plan(self, args):
+        return self._on_qt(self._apply_manufacturing_plan, args)
+
+    def _apply_manufacturing_plan(self, args):
+        plan = plan_manufacturing_settings(self._manufacturing_snapshot(), args)
+        applied = []
+        for key, value in plan["recommended_settings"].items():
+            applied.append(self._set_setting(key, value, "global"))
+        return {"plan": plan, "applied": applied,
+                "requires_reslice": True,
+                "note": "Settings were applied to the live project; slice and inspect a representative part."}
 
     def capture_manufacturing(self, args):
         return self._on_qt(self._capture_manufacturing, args)
@@ -787,6 +913,37 @@ class SteSlicerAdapter(object):
         return compare_cost_variants(self._cost_variants.get("baseline"),
                                      self._cost_variants.get("candidate"))
 
+    def list_printers(self, unused=None):
+        return self._printer_fleet.list()
+
+    def get_printer_status(self, args):
+        return self._printer_fleet.get(args["printer_id"]).status()
+
+    def get_printer_temperatures(self, args):
+        return self._printer_fleet.get(args["printer_id"]).temperatures()
+
+    def upload_gcode(self, args):
+        path = os.path.abspath(os.path.expanduser(args["path"]))
+        verify_exported_file(path, "gcode")
+        return self._printer_fleet.get(args["printer_id"]).upload(path)
+
+    def printer_command(self, args, command):
+        printer = self._printer_fleet.get(args["printer_id"])
+        if command == "start" and isinstance(printer, MoonrakerBackend):
+            filename = str(args.get("filename") or "").strip()
+            if not filename:
+                raise ToolError("Moonraker start_print requires the uploaded filename")
+            return printer.start(filename)
+        return getattr(printer, command)()
+
+    def start_print(self, args): return self.printer_command(args, "start")
+    def pause_print(self, args): return self.printer_command(args, "pause")
+    def resume_print(self, args): return self.printer_command(args, "resume")
+    def cancel_print(self, args): return self.printer_command(args, "cancel")
+
+    def plan_fleet_schedule(self, args):
+        return self._printer_fleet.plan(args.get("jobs") or [])
+
     def _slice_status(self):
         backend = self._app.getBackend()
         scene = self._app.getController().getScene()
@@ -795,18 +952,41 @@ class SteSlicerAdapter(object):
         gcode = getattr(scene, "gcode_dict", {}).get(plate, [])
         if getattr(backend, "_is_disabled", False):
             state = "disabled"
+            stage = "disabled"
+        elif getattr(self, "_slice_terminal_state", None) == "error":
+            state = "error"
+            stage = self._slice_stage or "failed"
         elif getattr(backend, "_slicing", False):
             state = "processing"
+            stage = "engine"
         elif gcode:
             state = "done"
+            stage = "gcode_ready"
+            self._slice_terminal_state = "done"
+        elif getattr(self, "_slice_requested_at", None) is not None:
+            # STE's 5D backend is a multi-stage pipeline.  Between the classic
+            # engine, cylindrical engine, basement generation and Glicer it
+            # legitimately clears backend._slicing for short periods.
+            state = "processing"
+            stage = "backend_transition"
         else:
             state = "not_started"
-        status = {"state": state}
+            stage = "idle"
+        if stage != getattr(self, "_slice_stage", "idle"):
+            self._slice_stage = stage
+            self._slice_last_progress_at = time.time()
+        status = {"state": state, "stage": stage,
+                  "generation": getattr(self, "_slice_generation", 0),
+                  "error": getattr(self, "_slice_last_error", None)}
         if state == "processing":
-            started_at = getattr(backend, "_slice_start_time", None)
+            started_at = (getattr(self, "_slice_requested_at", None) or
+                          getattr(backend, "_slice_start_time", None))
             if started_at:
                 elapsed = max(0, int(time.time() - started_at))
                 status["elapsed_seconds"] = elapsed
+                status["seconds_since_progress"] = max(
+                    0, int(time.time() - (getattr(self, "_slice_last_progress_at", None)
+                                          or started_at)))
                 if elapsed >= 180:
                     status["warning"] = (
                         "Slicing is still processing after 3 minutes; "
@@ -998,7 +1178,12 @@ class SteSlicerAdapter(object):
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-        verification = verify_exported_file(path, "gcode")
+        stack = self._stack()
+        verification = verify_exported_file(
+            path, "gcode",
+            expected_mode=stack.getProperty("printing_mode", "value"),
+            bed_temperature=stack.getProperty("material_bed_temperature", "value"),
+        )
         return {
             "success": True,
             "status": "exported",

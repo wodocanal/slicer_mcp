@@ -1,8 +1,8 @@
 {
     "name": "AI Assistant (команда)",
     "author": "Slicer MCP Team",
-    "version": "0.7.6",
-    "description": "3D/5D assistant with prototype planning and local TopOpt optimization bridge",
+    "version": "0.8.0",
+    "description": "3D/5D MCP assistant with verified slicing, risk, economics and printer fleet tools",
     "api": 5,
     "i18n-catalog": "steslicer"
 }

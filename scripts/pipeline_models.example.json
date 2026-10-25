@@ -11,23 +11,39 @@
       "name": "conveyor-wheel",
       "path": "../inputs/conveyor-wheel/model.stl",
       "mode": "cylindrical_full",
-      "rotary_axis": "Z",
+      "five_d": {
+        "source_axis": "Y",
+        "target_scene_axis": "Y",
+        "center_on_rotary_axis": true,
+        "place_on_surface": true,
+        "center_tolerance_mm": 0.05
+      },
       "material": "generic_pla_175",
       "quality": "fast",
       "settings": {
         "cylindrical_mode_base_diameter": 20
-      }
+      },
+      "slice_timeout": 600,
+      "stall_timeout": 120
     },
     {
       "name": "simple-cylinder",
       "path": "../inputs/simple-cylinder/model.stl",
       "mode": "cylindrical_full",
-      "rotary_axis": "Z",
+      "five_d": {
+        "source_axis": "Z",
+        "target_scene_axis": "Y",
+        "center_on_rotary_axis": true,
+        "place_on_surface": true,
+        "center_tolerance_mm": 0.05
+      },
       "material": "generic_pla_175",
       "quality": "fast",
       "settings": {
         "cylindrical_mode_base_diameter": 20
-      }
+      },
+      "slice_timeout": 600,
+      "stall_timeout": 120
     }
   ]
 }

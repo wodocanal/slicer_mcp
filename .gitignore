@@ -10,4 +10,5 @@ AIAssistantTeam/optimization_bridge/data/jobs/*
 !AIAssistantTeam/optimization_bridge/data/jobs/.gitkeep
 .slicer-mcp/
 .codex/
-dist/
+dist/*
+!dist/AIAssistantTeam-ste-plugin.zip

@@ -5,6 +5,8 @@ import os
 import re
 import time
 import zipfile
+import math
+import xml.etree.ElementTree as ET
 
 try:
     from xml.sax.saxutils import escape
@@ -186,7 +188,7 @@ def _number(value):
     return "%.9g" % float(value)
 
 
-def verify_exported_file(path, kind):
+def verify_exported_file(path, kind, expected_mode=None, bed_temperature=None):
     """Verify that a writer really created a useful file on disk."""
     path = os.path.abspath(path)
     if not os.path.exists(path):
@@ -198,7 +200,58 @@ def verify_exported_file(path, kind):
         if size <= 1024:
             raise ToolError("The saved 3MF project is too small (%d bytes): %s"
                             % (size, path))
-        return {"bytes": size}
+        required = set([
+            "[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model",
+            "Metadata/slicer_mcp_project.json",
+        ])
+        try:
+            with zipfile.ZipFile(path, "r") as archive:
+                names = set(archive.namelist())
+                missing = sorted(required - names)
+                if missing:
+                    raise ToolError("3MF entries missing: %s" % ", ".join(missing))
+                bad = archive.testzip()
+                if bad:
+                    raise ToolError("Corrupt 3MF member: %s" % bad)
+                root = ET.fromstring(archive.read("3D/3dmodel.model"))
+                metadata = json.loads(
+                    archive.read("Metadata/slicer_mcp_project.json").decode("utf-8")
+                )
+        except (zipfile.BadZipFile, ET.ParseError, ValueError) as error:
+            raise ToolError("Invalid 3MF package: %s" % error)
+        namespace = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+        objects = root.findall(".//m:resources/m:object", namespace)
+        object_ids = [item.get("id") for item in objects]
+        if not objects or len(object_ids) != len(set(object_ids)):
+            raise ToolError("3MF must contain uniquely identified model objects")
+        object_id_set = set(object_ids)
+        triangle_count = 0
+        for item in objects:
+            vertices = item.findall(".//m:vertices/m:vertex", namespace)
+            for vertex in vertices:
+                for axis in ("x", "y", "z"):
+                    try:
+                        value = float(vertex.get(axis))
+                    except (TypeError, ValueError):
+                        raise ToolError("3MF contains an invalid vertex coordinate")
+                    if not math.isfinite(value):
+                        raise ToolError("3MF contains a non-finite vertex coordinate")
+            for triangle in item.findall(".//m:triangles/m:triangle", namespace):
+                try:
+                    indices = [int(triangle.get(key)) for key in ("v1", "v2", "v3")]
+                except (TypeError, ValueError):
+                    raise ToolError("3MF contains an invalid triangle index")
+                if min(indices) < 0 or max(indices) >= len(vertices):
+                    raise ToolError("3MF triangle references a missing vertex")
+                triangle_count += 1
+        build_items = root.findall(".//m:build/m:item", namespace)
+        if not build_items or any(item.get("objectid") not in object_id_set
+                                  for item in build_items):
+            raise ToolError("3MF build section references missing objects")
+        if not isinstance(metadata, dict) or not metadata.get("schema"):
+            raise ToolError("3MF project metadata is missing its schema")
+        return {"bytes": size, "objects": len(objects),
+                "triangles": triangle_count, "metadata_schema": metadata.get("schema")}
     if kind != "gcode":
         raise ToolError("Unsupported verification format: %s" % kind)
     if size <= 1024:
@@ -207,14 +260,27 @@ def verify_exported_file(path, kind):
         sample = stream.read(min(size, 4 * 1024 * 1024)).decode("utf-8", "replace")
     patterns = {
         "G28": r"(?mi)^\s*G28(?:\s|;|$)",
-        "G1": r"(?mi)^\s*G1(?:\s|;|$)",
+        "motion": r"(?mi)^\s*G[01](?:\s|;|$)",
+        "extrusion": r"(?mi)^\s*G[01][^\r\n;]*\bE-?(?:\d|\.)",
         "M104/M109": r"(?mi)^\s*M10[49](?:\s|;|$)",
         "M140/M190": r"(?mi)^\s*M(?:140|190)(?:\s|;|$)",
+        "START": r"(?mi)^\s*START(?:\s|;|$)",
+        "G56": r"(?mi)^\s*G56(?:\s|;|$)",
+        "rotary_motion": r"(?mi)^\s*G[01][^\r\n;]*\b[AC]-?(?:\d|\.)",
     }
     commands = {name: bool(re.search(pattern, sample)) for name, pattern in patterns.items()}
     # G28 is optional for Stereotech profiles: homing may be performed by the
     # printer/controller rather than emitted in the exported payload.
-    required = ("G1", "M104/M109", "M140/M190")
+    detected_mode = expected_mode
+    if not detected_mode:
+        match = re.search(r"(?mi)^;\s*PRINTING_MODE:\[([^\]]+)\]", sample)
+        detected_mode = match.group(1).strip() if match else "classic"
+    is_five_d = detected_mode in ("cylindrical", "cylindrical_full")
+    required = ["motion", "extrusion", "M104/M109"]
+    if is_five_d:
+        required.extend(["START", "G56", "rotary_motion"])
+    elif bed_temperature is not None and float(bed_temperature) > 0:
+        required.append("M140/M190")
     missing = [name for name in required if not commands[name]]
     if missing:
         raise ToolError(
@@ -223,7 +289,10 @@ def verify_exported_file(path, kind):
     warnings = [] if commands["G28"] else [
         "G28 is absent; accepted for a Stereotech profile"
     ]
-    return {"bytes": size, "commands": commands, "warnings": warnings}
+    if not is_five_d and bed_temperature is None and not commands["M140/M190"]:
+        warnings.append("Bed heating is absent; accepted because the active bed temperature is unknown")
+    return {"bytes": size, "commands": commands, "warnings": warnings,
+            "printing_mode": detected_mode}
 
 
 def verified_write_result(tool_name, result):

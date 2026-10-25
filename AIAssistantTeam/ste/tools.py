@@ -95,6 +95,25 @@ def build_registry(registry, adapter):
         False,
     )
     registry.add(
+        "prepare_scene_5d",
+        "Rotate a part from its declared STL axis to the configured STE rotary scene axis, "
+        "center it on that axis, place it on the build surface and return measured bounds. "
+        "The caller must supply or confirm the engineering rotation axis.",
+        {
+            "object_id": STRING,
+            "source_axis": {"type": "string", "enum": ["X", "Y", "Z"]},
+            "target_scene_axis": {"type": "string", "enum": ["X", "Y", "Z"],
+                                  "default": "Y"},
+            "center_on_rotary_axis": {"type": "boolean", "default": True},
+            "place_on_surface": {"type": "boolean", "default": True},
+            "center_tolerance_mm": {"type": "number", "minimum": 0,
+                                    "default": 0.05},
+        },
+        ["object_id", "source_axis"],
+        adapter.prepare_scene_5d,
+        False,
+    )
+    registry.add(
         "arrange_models",
         "Start automatic placement of all models on the active build plate.",
         {},
@@ -149,6 +168,30 @@ def build_registry(registry, adapter):
         [],
         adapter.assess_risk,
     )
+    registry.add(
+        "analyze_geometry_risk_map",
+        "Analyze the current transformed triangle mesh for measured first-layer contact and "
+        "spatial overhang hotspots. This is geometric screening, not collision simulation.",
+        {"overhang_limit_deg": {"type": "number", "minimum": 0, "maximum": 90},
+         "first_layer_height_mm": {"type": "number", "exclusiveMinimum": 0},
+         "max_hotspots": {"type": "integer", "minimum": 1, "maximum": 1000}},
+        [], adapter.analyze_risk_map,
+    )
+    registry.add(
+        "analyze_failure_cost_scenarios",
+        "Calculate early, middle and late failed-print material, time, replacement and delay "
+        "cost scenarios from a completed live slice. Probabilities are used only when supplied.",
+        {"machine_hour_rate_rub": NUMBER,
+         "material_prices_rub_per_kg": {"type": "array", "items": NUMBER},
+         "quantity": {"type": "integer", "minimum": 1},
+         "parts_per_job": {"type": "integer", "minimum": 1},
+         "machine_count": {"type": "integer", "minimum": 1},
+         "delay_cost_rub_per_hour": NUMBER,
+         "failure_stages_percent": {"type": "array", "items": NUMBER},
+         "failure_probabilities_percent": {"type": "array", "items": NUMBER}},
+        ["machine_hour_rate_rub", "material_prices_rub_per_kg"],
+        adapter.analyze_failure_cost,
+    )
     priority_properties = {
         "scenario": {"type": "string", "enum": ["prototype", "production"]},
         "quantity": {"type": "integer", "minimum": 1},
@@ -162,6 +205,12 @@ def build_registry(registry, adapter):
         "Recommend starting settings for a quick low-cost prototype or final production. "
         "Does not change the slicer or certify strength.",
         priority_properties, ["scenario"], adapter.plan_manufacturing,
+    )
+    registry.add(
+        "apply_manufacturing_plan",
+        "Generate and apply the deterministic prototype or production settings plan to the "
+        "live STE project. Returns every requested and effective value; slicing remains explicit.",
+        priority_properties, ["scenario"], adapter.apply_manufacturing_plan, False,
     )
     cost_properties = {
         "machine_hour_rate_rub": NUMBER,
@@ -243,6 +292,29 @@ def build_registry(registry, adapter):
         "facts, cost, schedule and screening risk.",
         {}, [], adapter.compare_manufacturing,
     )
+    registry.add("list_printers", "List explicitly configured OctoPrint and Moonraker printers.",
+                 {}, [], adapter.list_printers)
+    registry.add("get_printer_status", "Read a configured printer's live job status.",
+                 {"printer_id": STRING}, ["printer_id"], adapter.get_printer_status)
+    registry.add("get_printer_temperatures", "Read live extruder and bed temperatures.",
+                 {"printer_id": STRING}, ["printer_id"], adapter.get_printer_temperatures)
+    registry.add("upload_gcode", "Validate and upload G-code without starting a print.",
+                 {"printer_id": STRING, "path": STRING}, ["printer_id", "path"],
+                 adapter.upload_gcode, False)
+    registry.add("start_print", "Start an already uploaded job on an explicit printer.",
+                 {"printer_id": STRING, "filename": STRING}, ["printer_id"],
+                 adapter.start_print, False)
+    registry.add("pause_print", "Pause the active job on an explicit printer.",
+                 {"printer_id": STRING}, ["printer_id"], adapter.pause_print, False)
+    registry.add("resume_print", "Resume the active job on an explicit printer.",
+                 {"printer_id": STRING}, ["printer_id"], adapter.resume_print, False)
+    registry.add("cancel_print", "Cancel the active job on an explicit printer.",
+                 {"printer_id": STRING}, ["printer_id"], adapter.cancel_print, False)
+    registry.add("plan_fleet_schedule", "Assign estimated jobs to configured printers by load.",
+                 {"jobs": {"type": "array", "items": {"type": "object",
+                    "properties": {"job_id": STRING, "duration_seconds": NUMBER},
+                    "required": ["job_id", "duration_seconds"]}}}, ["jobs"],
+                 adapter.plan_fleet_schedule)
     registry.add(
         "get_optimization_capabilities",
         "Check the local TopOpt bridge, solver dependencies and prepared templates.",

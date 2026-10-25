@@ -285,17 +285,11 @@ class AssistantController(QObject):
             return False
         if self._bridge_health_ok(connection):
             return True
-        if not self._terminate_bridge_pid(connection.get("pid")):
-            raise RuntimeError(
-                "Port 8765 is occupied, but the stale TopOpt process cannot be identified"
-            )
-        deadline = time.time() + 3.0
-        while time.time() < deadline and self._bridge_port_listening(0.15):
-            time.sleep(0.1)
-        if self._bridge_port_listening(0.15):
-            raise RuntimeError("The stale TopOpt process did not release port 8765")
-        self._remove_bridge_connection()
-        return False
+        # connection.json is user-writable and cannot authorize taskkill.
+        # Only a Popen handle created by this controller may be terminated.
+        raise RuntimeError(
+            "Port 8765 is occupied by a service that did not authenticate as this TopOpt bridge"
+        )
 
     def _wait_for_bridge_start(self, process, token, timeout=4.0):
         deadline = time.time() + timeout
@@ -409,11 +403,9 @@ class AssistantController(QObject):
                 pass
         _close_job(AssistantController._bridge_job)
         AssistantController._bridge_job = None
-        if process is None:
-            connection = self._read_bridge_connection()
-            self._terminate_bridge_pid(connection.get("pid"))
         AssistantController._bridge_proc = None
-        self._remove_bridge_connection()
+        if process is not None:
+            self._remove_bridge_connection()
         self._optimization = {"checking": False, "capabilities": None,
                               "templates": [], "error": "Служба TopOpt остановлена."}
         self.optimizationChanged.emit()

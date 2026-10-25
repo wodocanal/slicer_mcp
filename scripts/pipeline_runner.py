@@ -111,29 +111,50 @@ def check_rotary_axis(dimensions, axis, tolerance=0.80):
     }
 
 
-def validate_artifact(path, kind):
+def validate_artifact(path, kind, expected_mode=None):
     path = Path(path).resolve()
     if not path.is_file():
         raise PipelineError("Expected artifact was not created: %s" % path)
     size = path.stat().st_size
     if kind == "3mf":
-        if size <= 0:
-            raise PipelineError("3MF artifact is empty: %s" % path)
-        return {"path": str(path), "bytes": size}
+        if size <= 1024:
+            raise PipelineError("3MF artifact is too small: %s" % path)
+        import zipfile
+        import xml.etree.ElementTree as ET
+        required = {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model",
+                    "Metadata/slicer_mcp_project.json"}
+        try:
+            with zipfile.ZipFile(str(path), "r") as archive:
+                missing = required - set(archive.namelist())
+                if missing or archive.testzip():
+                    raise PipelineError("3MF package is incomplete or corrupt: %s" % path)
+                ET.fromstring(archive.read("3D/3dmodel.model"))
+                json.loads(archive.read("Metadata/slicer_mcp_project.json").decode("utf-8"))
+        except (zipfile.BadZipFile, ValueError, ET.ParseError) as error:
+            raise PipelineError("Invalid 3MF package: %s" % error)
+        return {"path": str(path), "bytes": size, "structure_verified": True}
     if size <= 1024:
         raise PipelineError("G-code artifact is too small: %s (%d bytes)" % (path, size))
     sample = path.read_bytes()[:4 * 1024 * 1024].decode("utf-8", "replace")
     commands = {
         "G28": r"(?mi)^\s*G28(?:\s|;|$)",
-        "G1": r"(?mi)^\s*G1(?:\s|;|$)",
+        "motion": r"(?mi)^\s*G[01](?:\s|;|$)",
+        "extrusion": r"(?mi)^\s*G[01][^\r\n;]*\bE-?(?:\d|\.)",
         "M104/M109": r"(?mi)^\s*M10[49](?:\s|;|$)",
         "M140/M190": r"(?mi)^\s*M(?:140|190)(?:\s|;|$)",
+        "START": r"(?mi)^\s*START(?:\s|;|$)",
+        "G56": r"(?mi)^\s*G56(?:\s|;|$)",
+        "rotary_motion": r"(?mi)^\s*G[01][^\r\n;]*\b[AC]-?(?:\d|\.)",
     }
     found = {label: re.search(pattern, sample) is not None
              for label, pattern in commands.items()}
     # Stereotech start-code profiles may home outside the exported payload, so
     # G28 is diagnostic rather than a reason to reject an otherwise valid file.
-    missing = [label for label in ("G1", "M104/M109", "M140/M190")
+    is_five_d = expected_mode in ("cylindrical", "cylindrical_full")
+    required = ["motion", "extrusion", "M104/M109"]
+    if is_five_d:
+        required.extend(["START", "G56", "rotary_motion"])
+    missing = [label for label in required
                if not found[label]]
     if missing:
         raise PipelineError("G-code is missing commands: %s" % ", ".join(missing))
@@ -232,7 +253,7 @@ class PipelineRunner(object):
             "load_model", "list_objects", "remove_object", "set_print_mode",
             "list_profiles", "select_profile", "auto_orient_object",
             "start_slicing", "get_slicing_status", "save_project_3mf",
-            "export_gcode",
+            "export_gcode", "prepare_scene_5d",
         }
         missing = sorted(required - names)
         if missing:
@@ -268,30 +289,50 @@ class PipelineRunner(object):
                 raise PipelineError("Expected one loaded object, found %d" % len(objects))
             part = objects[0]
             mode = infer_print_mode(name, specification.get("mode"))
-            self.client.call("set_print_mode", {"mode": mode}, retries=2)
+            mode_result = self.client.call("set_print_mode", {"mode": mode}, retries=2)
+            effective_mode = (mode_result.get("effective") or mode_result.get("mode")
+                              or mode_result.get("value"))
+            if effective_mode and effective_mode != mode:
+                raise PipelineError("Requested mode %s, but STE selected %s" %
+                                    (mode, effective_mode))
             material = self._select_profile(
                 "material", specification.get("material", "generic_pla_175")
             )
             quality = self._select_profile(
                 "quality", specification.get("quality", "fast")
             )
-            orientation = None
+            for key, value in (specification.get("settings") or {}).items():
+                changed = self.client.call("set_setting", {"key": key, "value": value,
+                                                            "scope": "global"}, retries=2)
+                if str(changed.get("effective")) != str(value):
+                    raise PipelineError("Setting %s requested %s but effective value is %s" %
+                                        (key, value, changed.get("effective")))
+            self._wait_for_stable_configuration(name)
             if mode == "classic":
                 orientation = self.client.call(
-                    "auto_orient_object", {"object_id": part["id"]}, retries=2
-                )
+                    "auto_orient_object", {"object_id": part["id"]}, retries=2)
             else:
-                orientation = check_rotary_axis(
-                    part.get("dimensions_mm"), specification.get("rotary_axis")
-                )
-                for warning in orientation.get("warnings") or []:
-                    self.log(name, "rotary_axis_warning", warning=warning,
-                             selected_axis=orientation.get("axis"))
-            for key, value in (specification.get("settings") or {}).items():
-                self.client.call("set_setting", {"key": key, "value": value,
-                                                  "scope": "global"}, retries=2)
-            self._start_slicing_safely(name)
-            slicing = self._wait_for_slice(name)
+                five_d = dict(specification.get("five_d") or {})
+                source_axis = five_d.get("source_axis", specification.get("rotary_axis"))
+                if not source_axis:
+                    raise PipelineError("5D model requires five_d.source_axis")
+                axis_check = check_rotary_axis(part.get("dimensions_mm"), source_axis)
+                orientation = self.client.call("prepare_scene_5d", {
+                    "object_id": part["id"], "source_axis": source_axis,
+                    "target_scene_axis": five_d.get("target_scene_axis", "Y"),
+                    "center_on_rotary_axis": five_d.get("center_on_rotary_axis", True),
+                    "place_on_surface": five_d.get("place_on_surface", True),
+                    "center_tolerance_mm": five_d.get("center_tolerance_mm", 0.05),
+                }, retries=2)
+                orientation["axis_check"] = axis_check
+                if not orientation.get("centered"):
+                    raise PipelineError("5D scene preparation did not center the part on the rotary axis")
+            self._wait_for_stable_configuration(name)
+            generation = self._start_slicing_safely(name)
+            slicing = self._wait_for_slice(
+                name, generation,
+                int(specification.get("slice_timeout", self.slice_timeout)),
+                int(specification.get("stall_timeout", 120)))
             self._wait_for_qt_ready(name)
             project_result = self._write_artifact_safely(
                 name, "save_project_3mf", project_path, "3mf")
@@ -299,7 +340,7 @@ class PipelineRunner(object):
             gcode_result = self._write_artifact_safely(
                 name, "export_gcode", gcode_path, "gcode")
             project = validate_artifact(project_path, "3mf")
-            gcode = validate_artifact(gcode_path, "gcode")
+            gcode = validate_artifact(gcode_path, "gcode", mode)
             for label, tool_result, artifact in (
                     ("3MF", project_result, project), ("G-code", gcode_result, gcode)):
                 if not isinstance(tool_result, dict) or tool_result.get("verified") is not True:
@@ -403,9 +444,10 @@ class PipelineRunner(object):
         )
         return selected.get("selected")
 
-    def _wait_for_slice(self, model):
-        deadline = time.monotonic() + self.slice_timeout
-        last_state = None
+    def _wait_for_slice(self, model, generation, timeout, stall_timeout):
+        deadline = time.monotonic() + timeout
+        last_marker = None
+        last_progress = time.monotonic()
         while time.monotonic() < deadline:
             try:
                 status = self.client.call("get_slicing_status", {}, retries=2)
@@ -415,23 +457,37 @@ class PipelineRunner(object):
                 time.sleep(self.poll_seconds)
                 continue
             state = status.get("state")
-            if state != last_state:
-                self.log(model, "slicing", state=state)
-                last_state = state
+            if status.get("generation") != generation:
+                time.sleep(self.poll_seconds)
+                continue
+            marker = (state, status.get("stage"))
+            if marker != last_marker:
+                self.log(model, "slicing", state=state, stage=status.get("stage"),
+                         generation=generation)
+                last_marker = marker
+                last_progress = time.monotonic()
             if state == "done":
                 return status
-            if state in TERMINAL_SLICE_STATES and state != "done":
-                raise PipelineError("Slicing stopped with state: %s" % state)
+            if state in ("error", "failed", "disabled", "cancelled"):
+                raise PipelineError("Slicing stopped at %s: %s" %
+                                    (status.get("stage"), status.get("error") or state))
+            if (status.get("stage") == "backend_transition"
+                    and time.monotonic() - last_progress > stall_timeout):
+                raise PipelineError("Slicing made no observable progress for %d seconds" %
+                                    stall_timeout)
             time.sleep(self.poll_seconds)
-        raise PipelineError("Slicing exceeded %d seconds" % self.slice_timeout)
+        raise PipelineError("Slicing exceeded %d seconds" % timeout)
 
     def _start_slicing_safely(self, model):
         """Confirm that slicing started before repeating a timed-out write call."""
         last_error = None
         for attempt in range(3):
             try:
-                self.client.call("start_slicing", {})
-                return
+                result = self.client.call("start_slicing", {})
+                generation = result.get("generation") or (result.get("status") or {}).get("generation")
+                if generation is None:
+                    raise PipelineError("start_slicing did not return a slice generation")
+                return generation
             except TransientMcpError as error:
                 last_error = error
                 self.log(model, "start_slicing_retry", attempt=attempt + 1,
@@ -442,13 +498,35 @@ class PipelineRunner(object):
                         status = self.client.call(
                             "get_slicing_status", {}, retries=1)
                         if status.get("state") in ("processing", "done"):
-                            return
+                            return status.get("generation")
                     except TransientMcpError:
                         pass
                     time.sleep(0.5)
                 if attempt < 2:
                     time.sleep(1.5)
         raise last_error
+
+    def _wait_for_stable_configuration(self, model, timeout=30):
+        """Wait for two identical state/object snapshots after profile and scene changes."""
+        deadline = time.monotonic() + timeout
+        previous = None
+        consecutive = 0
+        while time.monotonic() < deadline:
+            state = self.client.call("get_slicer_state", {}, retries=2)
+            objects = self.client.call("list_objects", {}, retries=2) or []
+            marker = json.dumps({"mode": state.get("printing_mode"),
+                                 "quality": state.get("quality_type"),
+                                 "material": state.get("material_id"),
+                                 "objects": objects}, sort_keys=True)
+            if marker == previous:
+                consecutive += 1
+                if consecutive >= 1:
+                    return
+            else:
+                previous = marker
+                consecutive = 0
+            time.sleep(0.75)
+        raise PipelineError("STE configuration did not stabilize before slicing %s" % model)
 
     def _wait_for_qt_ready(self, model, timeout=30):
         """Require two consecutive scene reads after long Qt/engine operations."""
